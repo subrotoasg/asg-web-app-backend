@@ -1,0 +1,1384 @@
+<title>পুশ নোটিফিকেশন পাইপলাইন</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anek+Bangla:wght@500;600;700;800&family=Hind+Siliguri:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* ============================================================
+   PUSH NOTIFICATION PIPELINE — animated broadcast deck
+   Committed single-theme dark design (built to be screen-recorded).
+   Every colour is painted explicitly so the page never borrows
+   the host ground.
+   ============================================================ */
+:root{
+  --ground:#0C0F17;
+  --ground-2:#11151F;
+  --panel:#161B28;
+  --panel-2:#1C2231;
+  --line:#28303F;
+  --line-soft:#1F2634;
+  --ink:#E9EDF6;
+  --ink-2:#B4BCCE;
+  --muted:#7E8798;
+  --signal:#F5A63C;      /* the payload — anything in flight */
+  --signal-dim:#8A5F22;
+  --infra:#3FC9C0;       /* the plumbing — redis, queue, cache */
+  --infra-dim:#1E6A66;
+  --fail:#E2607A;        /* invalid tokens, timeouts, drops */
+  --ok:#7BD88F;
+  --violet:#9A8CF0;      /* postgres / durable record */
+}
+
+*{box-sizing:border-box}
+
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"Hind Siliguri","Noto Sans Bengali",system-ui,sans-serif;
+  margin:0;
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
+
+/* ---------- the 16:9 stage ---------- */
+.deck{
+  position:relative;
+  width:min(100vw, calc(100vh * 16 / 9));
+  height:min(100vh, calc(100vw * 9 / 16));
+  background:
+    radial-gradient(120% 90% at 78% 8%, rgba(63,201,192,.10), transparent 55%),
+    radial-gradient(95% 80% at 10% 96%, rgba(245,166,60,.10), transparent 58%),
+    var(--ground);
+  overflow:hidden;
+  --u:1vw;
+}
+@supports (container-type:size){
+  .deck{container-type:size; --u:1cqw}
+}
+.deck::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size:calc(var(--u) * 4) calc(var(--u) * 4);
+  opacity:.34;
+  pointer-events:none;
+}
+
+/* type scale — one unit, one scale */
+.deck{
+  --t-hero:calc(var(--u) * 4.5);
+  --t-title:calc(var(--u) * 2.78);
+  --t-lead:calc(var(--u) * 1.54);
+  --t-body:calc(var(--u) * 1.22);
+  --t-small:calc(var(--u) * 1.05);
+  --t-label:calc(var(--u) * .95);
+  --t-mono:calc(var(--u) * .93);
+  --t-data:calc(var(--u) * 3.1);
+  --pad:calc(var(--u) * 5.2);
+}
+
+h1,h2,h3{font-family:"Anek Bangla","Hind Siliguri",system-ui,sans-serif;margin:0;text-wrap:balance;font-weight:700;line-height:1.14}
+p{margin:0}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-ligatures:none}
+
+/* ---------- slides ---------- */
+.slide{
+  position:absolute;
+  inset:0;
+  padding:calc(var(--u) * 4.0) var(--pad) calc(var(--u) * 4.6) calc(var(--u) * 9.2);
+  display:none;
+  flex-direction:column;
+  gap:calc(var(--u) * 1.35);
+  overflow:hidden;
+}
+.slide.is-active{display:flex}
+
+.eyebrow{
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  letter-spacing:.19em;
+  text-transform:uppercase;
+  color:var(--infra);
+  display:flex;
+  align-items:center;
+  gap:calc(var(--u) * .9);
+}
+.eyebrow::before{
+  content:"";
+  width:calc(var(--u) * 2.4);
+  height:2px;
+  background:var(--infra);
+  display:block;
+}
+.slide h2{font-size:var(--t-title);letter-spacing:-.01em}
+.lead{font-size:var(--t-lead);color:var(--ink-2);max-width:60ch;line-height:1.5;font-weight:300}
+
+/* staged reveal — only inside the active slide, so the first frame
+   of every slide is already composed when it comes up */
+.slide.is-active .rv{animation:rise .52s cubic-bezier(.2,.7,.3,1) backwards}
+.slide.is-active .rv:nth-child(1){animation-delay:.02s}
+.slide.is-active .rv:nth-child(2){animation-delay:.10s}
+.slide.is-active .rv:nth-child(3){animation-delay:.18s}
+.slide.is-active .rv:nth-child(4){animation-delay:.26s}
+.slide.is-active .rv:nth-child(5){animation-delay:.34s}
+.slide.is-active .rv:nth-child(6){animation-delay:.42s}
+@keyframes rise{from{opacity:0;transform:translateY(calc(var(--u) * 1.1))}to{opacity:1;transform:none}}
+
+/* ---------- chrome: rail, counter, progress ---------- */
+.rail{
+  position:absolute;
+  left:calc(var(--u) * 3.4);
+  top:50%;
+  transform:translateY(-50%);
+  display:flex;
+  flex-direction:column;
+  gap:calc(var(--u) * .62);
+  z-index:5;
+}
+.tick{
+  width:calc(var(--u) * .28);
+  height:calc(var(--u) * 1.05);
+  border-radius:99px;
+  background:var(--line);
+  transition:background .3s, height .3s;
+}
+.tick.on{background:var(--signal);height:calc(var(--u) * 2.1)}
+.tick.done{background:var(--infra-dim)}
+
+.slide-no{
+  position:absolute;
+  left:calc(var(--u) * 2.5);
+  top:calc(var(--u) * 3.6);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  color:var(--muted);
+  letter-spacing:.1em;
+  z-index:5;
+}
+.brandmark{
+  position:absolute;
+  right:var(--pad);
+  top:calc(var(--u) * 3.6);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  letter-spacing:.16em;
+  color:var(--muted);
+  text-transform:uppercase;
+  z-index:5;
+}
+.bar{
+  position:absolute;
+  left:0;bottom:0;right:0;
+  height:calc(var(--u) * .34);
+  background:var(--line-soft);
+  z-index:6;
+}
+.bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--infra),var(--signal));width:0;transition:width .45s cubic-bezier(.2,.7,.3,1)}
+
+.hint{
+  position:absolute;
+  right:var(--pad);
+  bottom:calc(var(--u) * 1.6);
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .82);
+  color:var(--muted);
+  letter-spacing:.08em;
+  z-index:6;
+  display:flex;
+  gap:calc(var(--u) * 1.2);
+}
+.hint b{color:var(--ink-2);font-weight:500}
+.hint.is-hidden{opacity:0}
+
+/* ---------- teleprompter ---------- */
+.prompt{
+  position:absolute;
+  left:0;right:0;bottom:0;
+  background:linear-gradient(to top, rgba(9,11,17,.99), rgba(9,11,17,.96));
+  border-top:1px solid var(--line);
+  padding:calc(var(--u) * 2.2) var(--pad) calc(var(--u) * 2.4) calc(var(--u) * 9.2);
+  transform:translateY(101%);
+  transition:transform .38s cubic-bezier(.2,.7,.3,1);
+  z-index:7;
+  max-height:62%;
+  overflow-y:auto;
+}
+.prompt.open{transform:none}
+.prompt .ph{
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--signal);
+  margin-bottom:calc(var(--u) * 1.1);
+}
+.prompt .pt{font-size:calc(var(--u) * 1.6);line-height:1.62;color:var(--ink);max-width:72ch;font-weight:300}
+.prompt .pt em{color:var(--signal);font-style:normal;font-weight:500}
+
+/* ============================================================
+   SHARED PARTS
+   ============================================================ */
+
+/* node = one box in the pipeline */
+.node{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .55);
+  padding:calc(var(--u) * 1.05) calc(var(--u) * 1.15);
+  display:flex;
+  flex-direction:column;
+  gap:calc(var(--u) * .3);
+  min-width:0;
+}
+.node .nk{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .8);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+.node .nn{font-size:var(--t-small);font-weight:600;color:var(--ink);line-height:1.25}
+.node .nd{font-size:calc(var(--u) * .98);color:var(--ink-2);font-weight:300;line-height:1.35}
+.node.sig{border-color:var(--signal-dim);box-shadow:inset 0 0 0 1px rgba(245,166,60,.14)}
+.node.sig .nk{color:var(--signal)}
+.node.inf{border-color:var(--infra-dim)}
+.node.inf .nk{color:var(--infra)}
+.node.vio{border-color:#4A3F86}
+.node.vio .nk{color:var(--violet)}
+.node.bad{border-color:#7A3448}
+.node.bad .nk{color:var(--fail)}
+
+/* wire = animated connector. packets ride it left→right. */
+.wire{
+  position:relative;
+  flex:1 1 auto;
+  min-width:calc(var(--u) * 1.25);
+  height:2px;
+  background:var(--line);
+  align-self:center;
+}
+.wire::after{
+  content:"";
+  position:absolute;
+  right:calc(var(--u) * -.12);
+  top:50%;
+  width:calc(var(--u) * .5);
+  height:calc(var(--u) * .5);
+  border-right:2px solid var(--line);
+  border-top:2px solid var(--line);
+  transform:translateY(-50%) rotate(45deg);
+}
+.pkt{
+  position:absolute;
+  top:50%;
+  width:calc(var(--u) * .58);
+  height:calc(var(--u) * .58);
+  margin-top:calc(var(--u) * -.29);
+  border-radius:50%;
+  background:var(--signal);
+  box-shadow:0 0 calc(var(--u) * 1.1) rgba(245,166,60,.75);
+  opacity:0;
+}
+.slide.is-active .pkt{animation:flow 1.9s linear infinite}
+.pkt.t{background:var(--infra);box-shadow:0 0 calc(var(--u) * 1.1) rgba(63,201,192,.7)}
+.pkt.d1{animation-delay:.30s}
+.pkt.d2{animation-delay:.62s}
+.pkt.d3{animation-delay:.95s}
+.pkt.d4{animation-delay:1.28s}
+.pkt.d5{animation-delay:1.60s}
+@keyframes flow{
+  0%{left:0;opacity:0}
+  12%{opacity:1}
+  88%{opacity:1}
+  100%{left:100%;opacity:0}
+}
+
+/* stat chips */
+.chips{display:flex;gap:calc(var(--u) * .9);flex-wrap:wrap}
+.chip{
+  border:1px solid var(--line);
+  border-radius:99px;
+  padding:calc(var(--u) * .42) calc(var(--u) * 1.25);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-mono);
+  color:var(--ink-2);
+  background:rgba(22,27,40,.7);
+  white-space:nowrap;
+}
+.chip b{color:var(--signal);font-weight:700}
+.chip.i b{color:var(--infra)}
+.chip.g b{color:var(--ok)}
+.chip.r b{color:var(--fail)}
+
+/* code block */
+.code{
+  background:#0A0D14;
+  border:1px solid var(--line);
+  border-left:3px solid var(--signal);
+  border-radius:calc(var(--u) * .4);
+  padding:calc(var(--u) * 1.1) calc(var(--u) * 1.35);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-mono);
+  line-height:1.58;
+  color:#C6CEDE;
+  overflow-x:auto;
+  white-space:pre;
+}
+.code.inf{border-left-color:var(--infra)}
+.code.bad{border-left-color:var(--fail)}
+.code .k{color:#9A8CF0}
+.code .s{color:var(--ok)}
+.code .n{color:var(--signal)}
+.code .c{color:#5C657A}
+.code .f{color:var(--infra)}
+
+/* two column body */
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u) * 2.4);align-items:start;flex:1;min-height:0}
+.cols.wide-l{grid-template-columns:1.25fr 1fr}
+.cols.wide-r{grid-template-columns:1fr 1.3fr}
+.stack{display:flex;flex-direction:column;gap:calc(var(--u) * .95);min-width:0;min-height:0}
+
+/* bullet list where the marker carries meaning (a numbered step) */
+.steps{display:flex;flex-direction:column;gap:calc(var(--u) * .78);list-style:none;padding:0;margin:0}
+.steps li{display:flex;gap:calc(var(--u) * 1.05);align-items:flex-start;font-size:var(--t-body);color:var(--ink-2);font-weight:300;line-height:1.45}
+.steps li > .m{
+  flex:0 0 auto;
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .88);
+  color:var(--signal);
+  border:1px solid var(--signal-dim);
+  border-radius:calc(var(--u) * .28);
+  padding:calc(var(--u) * .12) calc(var(--u) * .5);
+  margin-top:calc(var(--u) * .22);
+  letter-spacing:.05em;
+}
+.steps.inf li > .m{color:var(--infra);border-color:var(--infra-dim)}
+.steps li b{color:var(--ink);font-weight:600}
+
+/* plain marker list — no false sequencing */
+.facts{display:flex;flex-direction:column;gap:calc(var(--u) * .66);list-style:none;padding:0;margin:0}
+.facts li{
+  position:relative;
+  padding-left:calc(var(--u) * 1.5);
+  font-size:var(--t-body);
+  color:var(--ink-2);
+  font-weight:300;
+  line-height:1.45;
+}
+.facts li::before{
+  content:"";
+  position:absolute;
+  left:0;top:calc(var(--u) * .62);
+  width:calc(var(--u) * .52);height:2px;
+  background:var(--infra);
+}
+.facts li b{color:var(--ink);font-weight:600}
+.facts.bad li::before{background:var(--fail)}
+.facts.sig li::before{background:var(--signal)}
+
+/* big number readout */
+.readout{display:flex;flex-direction:column;gap:calc(var(--u) * .2)}
+.readout .v{
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-data);
+  font-weight:700;
+  color:var(--signal);
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+}
+.readout .v.i{color:var(--infra)}
+.readout .v.r{color:var(--fail)}
+.readout .v.g{color:var(--ok)}
+.readout .l{font-size:calc(var(--u) * .95);color:var(--muted);font-family:"JetBrains Mono",monospace;letter-spacing:.11em;text-transform:uppercase}
+
+.panel{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .6);
+  padding:calc(var(--u) * 1.5) calc(var(--u) * 1.7);
+  display:flex;
+  flex-direction:column;
+  gap:calc(var(--u) * 1.05);
+}
+.panel .ptitle{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .86);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}
+  .pkt{opacity:1}
+}
+
+/* ============================================================
+   SLIDE-SPECIFIC SCENES
+   ============================================================ */
+
+/* S1 — the tower: rings pulse outward, packets stream away */
+.s-hero{justify-content:center;gap:calc(var(--u) * 1.9)}
+.s-hero h1{font-size:var(--t-hero);letter-spacing:-.015em;max-width:22ch}
+.s-hero h1 span{color:var(--signal)}
+.tower{
+  position:absolute;
+  right:calc(var(--u) * 8);
+  top:50%;
+  transform:translateY(-50%);
+  width:calc(var(--u) * 26);
+  height:calc(var(--u) * 26);
+  pointer-events:none;
+}
+.ring{
+  position:absolute;
+  left:50%;top:50%;
+  width:calc(var(--u) * 5);
+  height:calc(var(--u) * 5);
+  margin:calc(var(--u) * -2.5) 0 0 calc(var(--u) * -2.5);
+  border:1px solid var(--infra);
+  border-radius:50%;
+  opacity:0;
+}
+.slide.is-active .ring{animation:ping 3.4s cubic-bezier(.15,.6,.35,1) infinite}
+.ring:nth-child(2){animation-delay:.85s}
+.ring:nth-child(3){animation-delay:1.7s}
+.ring:nth-child(4){animation-delay:2.55s}
+@keyframes ping{
+  0%{transform:scale(.35);opacity:0}
+  10%{opacity:.85}
+  100%{transform:scale(4.6);opacity:0}
+}
+.core{
+  position:absolute;
+  left:50%;top:50%;
+  width:calc(var(--u) * 3.1);
+  height:calc(var(--u) * 3.1);
+  margin:calc(var(--u) * -1.55) 0 0 calc(var(--u) * -1.55);
+  border-radius:50%;
+  background:var(--signal);
+  box-shadow:0 0 calc(var(--u) * 3.4) rgba(245,166,60,.55);
+}
+.slide.is-active .core{animation:breathe 3.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.13)}}
+.orbit{position:absolute;inset:0}
+.slide.is-active .orbit{animation:spin 26s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.orbit i{
+  position:absolute;
+  width:calc(var(--u) * .52);height:calc(var(--u) * .52);
+  border-radius:50%;
+  background:var(--infra);
+  box-shadow:0 0 calc(var(--u) * .9) rgba(63,201,192,.8);
+}
+
+/* S2 — the naive loop grinding */
+.grind{display:flex;flex-direction:column;gap:calc(var(--u) * .7)}
+.track{height:calc(var(--u) * 1.0);background:var(--panel-2);border:1px solid var(--line);border-radius:99px;overflow:hidden;position:relative}
+.track > i{display:block;height:100%;background:var(--fail);width:0}
+.slide.is-active .track > i{animation:crawl 5.5s cubic-bezier(.05,.85,.15,1) infinite}
+@keyframes crawl{0%{width:0}70%{width:7%}100%{width:8%}}
+.stamp{
+  align-self:flex-start;
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * 1.5);
+  letter-spacing:.22em;
+  color:var(--fail);
+  border:2px solid var(--fail);
+  padding:calc(var(--u) * .4) calc(var(--u) * 1.1);
+  border-radius:calc(var(--u) * .3);
+  transform:rotate(-4deg);
+  opacity:0;
+}
+.slide.is-active .stamp{animation:slam 5.5s ease-out infinite}
+@keyframes slam{
+  0%,58%{opacity:0;transform:rotate(-4deg) scale(1.6)}
+  66%{opacity:1;transform:rotate(-4deg) scale(1)}
+  96%{opacity:1}
+  100%{opacity:0}
+}
+
+/* S3 — the two cost meters racing */
+.race{display:flex;flex-direction:column;gap:calc(var(--u) * 1.6)}
+.meter{display:flex;flex-direction:column;gap:calc(var(--u) * .48)}
+.meter .mh{display:flex;justify-content:space-between;align-items:baseline}
+.meter .mn{font-size:var(--t-body);color:var(--ink);font-weight:600}
+.meter .mv{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 2.2);font-weight:700;font-variant-numeric:tabular-nums}
+.meter .mb{height:calc(var(--u) * .8);background:var(--panel-2);border-radius:99px;overflow:hidden;border:1px solid var(--line)}
+.meter .mb > i{display:block;height:100%;width:0}
+.meter.cost .mv{color:var(--fail)}
+.meter.cost .mb > i{background:linear-gradient(90deg,#7A3448,var(--fail))}
+.slide.is-active .meter.cost .mb > i{animation:fill 4.2s cubic-bezier(.3,.8,.4,1) infinite}
+.meter.free .mv{color:var(--ok)}
+.meter.free .mb > i{background:var(--ok);width:2px}
+@keyframes fill{0%{width:0}72%{width:100%}100%{width:100%}}
+
+/* S4 — the full pipeline */
+.pipe{display:flex;align-items:center;gap:calc(var(--u) * .42);flex:1 1 auto;min-height:0}
+.pipe .node{flex:0 0 calc(var(--u) * 10.9);justify-content:center;padding:calc(var(--u) * .9) calc(var(--u) * .95)}
+.pipe .wire{flex:1 1 auto}
+.side{display:flex;gap:calc(var(--u) * 1.1);margin-top:calc(var(--u) * .4)}
+.side .node{flex:1}
+
+/* S5 — devices upserting into one row */
+.devices{display:flex;flex-direction:column;gap:calc(var(--u) * .7)}
+.dev{
+  display:flex;align-items:center;gap:calc(var(--u) * .9);
+  border:1px solid var(--line);border-radius:calc(var(--u) * .4);
+  padding:calc(var(--u) * .6) calc(var(--u) * .95);
+  background:var(--panel);
+  font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.0);
+  color:var(--ink-2);
+}
+.dev .tag{color:var(--infra);letter-spacing:.1em;font-size:calc(var(--u) * .82)}
+.dev .dot{width:calc(var(--u) * .5);height:calc(var(--u) * .5);border-radius:50%;background:var(--ok);flex:0 0 auto}
+.dev.stale .dot{background:var(--fail)}
+.dev.stale{color:var(--muted)}
+
+/* S9 — offset vs cursor */
+.vs{display:flex;flex-direction:column;gap:calc(var(--u) * 1.5)}
+.lane{display:flex;flex-direction:column;gap:calc(var(--u) * .45)}
+.lane .lh{display:flex;justify-content:space-between;align-items:baseline;font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.0)}
+.lane .lh .nm{color:var(--ink);letter-spacing:.06em}
+.lane .lh .rs{color:var(--muted)}
+.steps-bar{display:flex;gap:calc(var(--u) * .3);align-items:flex-end;height:calc(var(--u) * 5.4)}
+.steps-bar i{flex:1;background:var(--infra-dim);border-radius:calc(var(--u) * .15) calc(var(--u) * .15) 0 0;display:block}
+.lane.slow .steps-bar i{background:linear-gradient(180deg,var(--fail),#5E2436)}
+
+/* S10 — 500k dots collapsing into batches */
+.swarm{display:grid;grid-template-columns:repeat(25,1fr);gap:calc(var(--u) * .28);align-content:start}
+.swarm i{
+  aspect-ratio:1;
+  border-radius:50%;
+  background:var(--signal-dim);
+  display:block;
+  opacity:.5;
+}
+.slide.is-active .swarm i{animation:pop 3.6s ease-in-out infinite}
+@keyframes pop{
+  0%,100%{opacity:.32;transform:scale(.75)}
+  50%{opacity:1;transform:scale(1);background:var(--signal)}
+}
+
+/* S11 — the metering valve */
+.valve{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u) * .5)}
+.hopper{
+  width:calc(var(--u) * 16);height:calc(var(--u) * 4.4);
+  border:1px solid var(--line);border-bottom:none;
+  background:var(--panel);
+  clip-path:polygon(0 0,100% 0,62% 100%,38% 100%);
+  position:relative;overflow:hidden;
+}
+.hopper i{
+  position:absolute;width:calc(var(--u) * .42);height:calc(var(--u) * .42);
+  border-radius:50%;background:var(--signal);opacity:.85;
+}
+.gate{
+  width:calc(var(--u) * 6.2);height:calc(var(--u) * .5);
+  background:var(--infra);border-radius:99px;
+  box-shadow:0 0 calc(var(--u) * 1.4) rgba(63,201,192,.5);
+}
+.spill{position:relative;width:calc(var(--u) * 16);height:calc(var(--u) * 5.6);overflow:hidden}
+.spill i{
+  position:absolute;top:0;
+  width:calc(var(--u) * .42);height:calc(var(--u) * .42);
+  border-radius:50%;background:var(--signal);opacity:0;
+}
+.slide.is-active .spill i{animation:drop 1.5s linear infinite}
+@keyframes drop{0%{top:0;opacity:0}15%{opacity:1}100%{top:100%;opacity:0}}
+
+/* S12 — the redis gate: three knock, one enters */
+.gate-scene{display:flex;align-items:center;gap:calc(var(--u) * 1.4)}
+.knocks{display:flex;flex-direction:column;gap:calc(var(--u) * .75)}
+.knock{
+  border:1px solid var(--line);border-radius:calc(var(--u) * .35);
+  padding:calc(var(--u) * .55) calc(var(--u) * .95);
+  font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * .98);
+  color:var(--ink-2);background:var(--panel);white-space:nowrap;
+}
+.knock.pass{border-color:var(--ok);color:var(--ok)}
+.knock.block{border-color:#7A3448;color:var(--fail);text-decoration:line-through;text-decoration-color:rgba(226,96,122,.5)}
+.lockbox{
+  border:1px solid var(--infra-dim);border-radius:calc(var(--u) * .5);
+  background:var(--panel);padding:calc(var(--u) * 1.1) calc(var(--u) * 1.3);
+  text-align:center;
+}
+.slide.is-active .lockbox{animation:glow 2.6s ease-in-out infinite}
+@keyframes glow{0%,100%{box-shadow:0 0 0 rgba(63,201,192,0)}50%{box-shadow:0 0 calc(var(--u) * 2.2) rgba(63,201,192,.28)}}
+
+/* S13 — retry arcs growing */
+.retries{display:flex;align-items:flex-end;gap:calc(var(--u) * 1.3)}
+.retry{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u) * .4)}
+.retry .arc{
+  border:2px solid var(--signal-dim);border-bottom-color:transparent;border-left-color:transparent;
+  border-radius:50%;transform:rotate(45deg);
+}
+.retry .lbl{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * .95);color:var(--signal)}
+
+/* S14 — token stream shedding dead tokens */
+.stream{display:flex;flex-wrap:wrap;gap:calc(var(--u) * .34)}
+.stream i{width:calc(var(--u) * .62);height:calc(var(--u) * .62);border-radius:calc(var(--u) * .14);background:var(--infra-dim);display:block}
+.stream i.dead{background:var(--fail);opacity:.85}
+.slide.is-active .stream i.dead{animation:shed 3.2s ease-in-out infinite}
+@keyframes shed{0%,42%{transform:none;opacity:.9}62%,100%{transform:translateY(calc(var(--u) * 2.2)) scale(.4);opacity:0}}
+
+/* S16/S17 — cache keys ageing out under a version bump */
+.keys{display:flex;flex-direction:column;gap:calc(var(--u) * .5)}
+.keyrow{
+  font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * .95);
+  border:1px solid var(--line);border-radius:calc(var(--u) * .32);
+  padding:calc(var(--u) * .48) calc(var(--u) * .85);
+  background:var(--panel);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.keyrow .g{color:var(--signal)}
+.keyrow.dead{color:var(--muted);border-color:var(--line-soft);text-decoration:line-through;text-decoration-color:var(--fail)}
+.keyrow.live{border-color:var(--infra-dim);color:var(--ink)}
+.slide.is-active .keyrow.live{animation:glow 2.6s ease-in-out infinite}
+
+.funnel{display:flex;align-items:center;gap:calc(var(--u) * 1.1)}
+.many{display:grid;grid-template-columns:repeat(6,1fr);gap:calc(var(--u) * .26)}
+.many i{width:calc(var(--u) * .5);height:calc(var(--u) * .5);border-radius:50%;background:var(--infra-dim);display:block}
+.slide.is-active .many i{animation:pulse-dim 2.2s ease-in-out infinite}
+@keyframes pulse-dim{0%,100%{opacity:.35}50%{opacity:1}}
+</style>
+
+<div class="deck" id="deck">
+  <div class="slide-no mono" id="slideNo">01 / 19</div>
+  <div class="brandmark">Push Pipeline</div>
+  <nav class="rail" id="rail" aria-label="স্লাইড"></nav>
+
+  <!-- ══ 01 ══════════════════════════════════════════════ -->
+  <section class="slide s-hero is-active" data-dur="16">
+    <div class="tower" aria-hidden="true">
+      <span class="ring"></span><span class="ring"></span><span class="ring"></span><span class="ring"></span>
+      <div class="orbit">
+        <i style="left:6%;top:48%"></i><i style="left:92%;top:40%"></i>
+        <i style="left:48%;top:4%"></i><i style="left:52%;top:94%"></i>
+        <i style="left:18%;top:16%"></i><i style="left:82%;top:82%"></i>
+      </div>
+      <span class="core"></span>
+    </div>
+    <div class="eyebrow">Backend System Design · বাংলা</div>
+    <h1>লাখ লাখ ইউজারকে<br>পুশ নোটিফিকেশন —<br><span>একদম ফ্রিতে</span></h1>
+    <p class="lead">Firebase FCM + BullMQ + Redis + PostgreSQL দিয়ে বানানো একটা প্রোডাকশন পাইপলাইন। কোড, আর্কিটেকচার আর প্রতিটা সিদ্ধান্তের পেছনের কারণ।</p>
+    <div class="chips">
+      <span class="chip"><b>৫,০০,০০০+</b> ডিভাইস টোকেন</span>
+      <span class="chip i"><b>~১০০ সেকেন্ড</b> ফুল ব্রডকাস্ট</span>
+      <span class="chip g"><b>৳০</b> FCM খরচ</span>
+    </div>
+  </section>
+
+  <!-- ══ 02 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">সমস্যা</div>
+    <h2 class="rv">সহজ কোডটা কেন কাজ করে না</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="code bad"><span class="c">// যেটা সবাই প্রথমে লেখে</span>
+<span class="k">const</span> users = <span class="k">await</span> prisma.student.<span class="f">findMany</span>();
+
+<span class="k">for</span> (<span class="k">const</span> u <span class="k">of</span> users) {
+  <span class="k">await</span> <span class="f">sendNotification</span>(u.token);
+}
+
+res.<span class="f">json</span>({ success: <span class="k">true</span> });</div>
+        <div class="grind">
+          <div class="track"><i></i></div>
+          <div class="stamp">REQUEST TIMEOUT</div>
+        </div>
+      </div>
+      <ul class="facts bad">
+        <li><b>২৭ ঘণ্টা</b> — ৫ লাখ ইউজার × ২০০ms, একটার পর একটা</li>
+        <li><b>HTTP টাইমআউট</b> — Nginx ৩০ সেকেন্ডেই কানেকশন কেটে দেবে</li>
+        <li><b>মেমোরি শেষ</b> — <span class="mono">findMany()</span> ৫ লাখ রো একসাথে RAM-এ তোলে</li>
+        <li><b>FCM লিমিট</b> — এক কলে সর্বোচ্চ ৫০০ টোকেন, তার বেশি নেবেই না</li>
+        <li><b>সার্ভার রিস্টার্ট = সব শেষ</b> — কে পেয়েছে, কে পায়নি, কোনো রেকর্ড নেই</li>
+        <li><b>রিট্রাই নেই</b> — একটা নেটওয়ার্ক এরর মানেই ওই ইউজার বাদ</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 03 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">কেন Firebase</div>
+    <h2 class="rv">FCM-এ মেসেজের কোনো খরচ নেই</h2>
+    <div class="cols wide-l rv">
+      <div class="race">
+        <div class="meter cost">
+          <div class="mh"><span class="mn">SMS দিয়ে একটা ক্যাম্পেইন</span><span class="mv">৳ ১,৫০,০০০</span></div>
+          <div class="mb"><i></i></div>
+        </div>
+        <div class="meter free">
+          <div class="mh"><span class="mn">FCM দিয়ে একই ক্যাম্পেইন</span><span class="mv">৳ ০</span></div>
+          <div class="mb"><i></i></div>
+        </div>
+        <p class="lead" style="font-size:var(--t-small)">৫,০০,০০০ মেসেজ, প্রতি SMS আনুমানিক ৳০.৩০ ধরে। FCM-এ মেসেজ সংখ্যার কোনো বিল নেই — Android, iOS, ওয়েব সবই।</p>
+      </div>
+      <ul class="facts">
+        <li><b>মেসেজ আনলিমিটেড, দাম শূন্য</b> — Firebase Cloud Messaging কখনো per-message চার্জ করে না</li>
+        <li><b>তোমার আসল খরচ</b> — একটা VPS আর একটা Redis। ব্যস।</li>
+        <li><b>তিন প্ল্যাটফর্ম, এক API</b> — <span class="mono">android</span>, <span class="mono">apns</span>, <span class="mono">webpush</span> এক পেলোডেই</li>
+        <li><b>ডেলিভারি গুগলের দায়িত্ব</b> — ফোন অফলাইনে থাকলে গুগল ধরে রাখে, অন হলে পাঠায়</li>
+        <li>শর্ত একটাই — <b>প্রতি কলে ৫০০ টোকেন</b>, আর সেটাই পুরো ডিজাইনের ভিত্তি</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 04 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="42">
+    <div class="eyebrow rv">আর্কিটেকচার</div>
+    <h2 class="rv">পুরো পাইপলাইন — এক নজরে</h2>
+    <div class="pipe rv">
+      <div class="node"><span class="nk">Source</span><span class="nn">অ্যাডমিন প্যানেল</span><span class="nd">অথবা লাইভ ক্লাস / পেমেন্ট ইভেন্ট</span></div>
+      <div class="wire"><i class="pkt"></i><i class="pkt d2"></i><i class="pkt d4"></i></div>
+      <div class="node sig"><span class="nk">API · ৬ instance</span><span class="nn">Express + PM2 cluster</span><span class="nd">শুধু জব ঢোকায়, পাঠায় না</span></div>
+      <div class="wire"><i class="pkt d1"></i><i class="pkt d3"></i><i class="pkt d5"></i></div>
+      <div class="node inf"><span class="nk">Queue · Redis</span><span class="nn">BullMQ</span><span class="nd">txQueue · campaignQueue</span></div>
+      <div class="wire"><i class="pkt t"></i><i class="pkt t d2"></i><i class="pkt t d4"></i></div>
+      <div class="node inf"><span class="nk">Worker · আলাদা প্রসেস</span><span class="nn">concurrency ৩০</span><span class="nd">পেজিনেশন · ব্যাচ · থ্রটল</span></div>
+      <div class="wire"><i class="pkt d1"></i><i class="pkt d3"></i><i class="pkt d5"></i></div>
+      <div class="node"><span class="nk">Google</span><span class="nn">Firebase FCM</span><span class="nd">৫০০ টোকেন / কল</span></div>
+      <div class="wire"><i class="pkt"></i><i class="pkt d2"></i><i class="pkt d4"></i></div>
+      <div class="node"><span class="nk">Devices</span><span class="nn">৫ লাখ ফোন</span><span class="nd">Android · iOS · Web</span></div>
+    </div>
+    <div class="side rv">
+      <div class="node vio"><span class="nk">PostgreSQL</span><span class="nn">notificationLogs · pushNotifications · notificationUserStatus</span><span class="nd">কী পাঠানো হলো, কে পেল, কে দেখল — সবই এখানে</span></div>
+      <div class="node inf"><span class="nk">Redis Cache</span><span class="nn">ইন-অ্যাপ ফিড, ভার্সন-ভিত্তিক ইনভ্যালিডেশন</span><span class="nd">অ্যাপ খুললে লিস্টটা DB থেকে না, ক্যাশ থেকে আসে</span></div>
+    </div>
+  </section>
+
+  <!-- ══ 05 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">ধাপ ১</div>
+    <h2 class="rv">ডিভাইস রেজিস্ট্রেশন — টোকেন জমা</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="code"><span class="c">// POST /push/register</span>
+prisma.pushNotification.<span class="f">upsert</span>({
+  where:  { token },              <span class="c">// token @unique</span>
+  update: { studentId, platform, isValid: <span class="k">true</span>,
+            lastSeenAt: now },
+  create: { token, studentId, adminId, userType,
+            platform, isValid: <span class="k">true</span> }
+});</div>
+        <div class="devices">
+          <div class="dev"><span class="dot"></span><span class="tag">ANDROID</span> fT9x…8kQ2 → student · valid</div>
+          <div class="dev"><span class="dot"></span><span class="tag">WEB</span> cM4p…1rZ7 → student · valid</div>
+          <div class="dev stale"><span class="dot"></span><span class="tag">IOS</span> aB2n…5vL9 → অ্যাপ আনইনস্টল · invalid</div>
+        </div>
+      </div>
+      <ul class="facts">
+        <li><b>একজন ইউজার = অনেক টোকেন</b> — ফোন, ট্যাব, ল্যাপটপের ব্রাউজার, সবগুলোই আলাদা রো</li>
+        <li><b>upsert কেন</b> — অ্যাপ রিইনস্টল বা টোকেন রিফ্রেশ হলে ডুপ্লিকেট রো নয়, একই রো আপডেট হয়</li>
+        <li><b>token কে unique রাখা</b> — এটাই পুরো টেবিলের গার্ড, রেস কন্ডিশনেও ডুপ্লিকেট ঢুকতে পারে না</li>
+        <li><b>isValid ফ্ল্যাগ</b> — মরা টোকেন ডিলিট করি না, শুধু নিভিয়ে দিই, হিসাব থেকে যায়</li>
+        <li><b>studentId অথবা adminId</b> — ঠিক একটা, দুটো একসাথে হলে রিকোয়েস্ট রিজেক্ট</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 06 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">ডাটাবেজ</div>
+    <h2 class="rv">তিনটা টেবিল, তিনটা আলাদা প্রশ্নের উত্তর</h2>
+    <div class="cols wide-r rv" style="grid-template-columns:1fr 1fr 1fr;gap:calc(var(--u) * 1.2)">
+      <div class="panel">
+        <div class="ptitle">pushNotifications</div>
+        <div class="readout"><span class="v i">কোথায়?</span><span class="l">device tokens</span></div>
+        <ul class="facts" style="gap:calc(var(--u) * .5)">
+          <li><span class="mono">token</span> · unique</li>
+          <li><span class="mono">platform</span> · WEB / ANDROID / IOS</li>
+          <li><span class="mono">isValid</span> · lastSeenAt</li>
+          <li><span class="mono">@@index([studentId, isValid])</span></li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ptitle">notificationLogs</div>
+        <div class="readout"><span class="v">কী?</span><span class="l">campaign record</span></div>
+        <ul class="facts sig" style="gap:calc(var(--u) * .5)">
+          <li><span class="mono">uniqueId</span> · জব আর লগের সেতু</li>
+          <li>title · body · image · deepLink</li>
+          <li><span class="mono">sendCount / failedCount / invalidCount</span></li>
+          <li>courseId · cycleId · senderType</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ptitle">notificationUserStatus</div>
+        <div class="readout"><span class="v g">কে দেখল?</span><span class="l">per-user state</span></div>
+        <ul class="facts" style="gap:calc(var(--u) * .5)">
+          <li><span class="mono">isViewed</span> · viewedAt</li>
+          <li><span class="mono">isClicked</span> · clickedAt</li>
+          <li><span class="mono">@@unique([notificationId, studentId])</span></li>
+          <li>আনরিড ব্যাজের হিসাব এখান থেকেই</li>
+        </ul>
+      </div>
+    </div>
+    <p class="lead rv" style="font-size:var(--t-small)">এক টেবিলে সব রাখলে ৫ লাখ ইউজার × প্রতিটা নোটিফিকেশন = কোটি কোটি রো। তাই ক্যাম্পেইনের রেকর্ড একটাই, আর per-user স্ট্যাটাস রো তৈরি হয় শুধু তখনই যখন কেউ আসলেই দেখে বা ক্লিক করে।</p>
+  </section>
+
+  <!-- ══ 07 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="32">
+    <div class="eyebrow rv">ধাপ ২ · মূল কৌশল</div>
+    <h2 class="rv">API কখনোই নোটিফিকেশন পাঠায় না</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="code"><span class="c">// pushMessaging.services.js</span>
+<span class="k">const</span> uuid = <span class="f">uuidv4</span>();
+
+<span class="k">await</span> campaignQueue.<span class="f">add</span>(<span class="s">"broadcast"</span>, {
+  uuid, type, id, title, body, data
+});
+
+<span class="k">await</span> prisma.notificationLog.<span class="f">create</span>({
+  data: { uniqueId: uuid, title, body, … }
+});
+
+<span class="k">return</span> result;   <span class="c">// ~৪০ms-এ 200 OK</span></div>
+        <div class="chips">
+          <span class="chip"><b>৪০ms</b> রেসপন্স</span>
+          <span class="chip i"><b>১ জন</b> হোক বা <b>৫ লাখ</b></span>
+          <span class="chip g"><b>একই সময়</b></span>
+        </div>
+      </div>
+      <ul class="steps">
+        <li><span class="m">০১</span><span>একটা <b>uuid</b> বানানো হয় — এটাই জব আর ডাটাবেজ লগের কমন আইডি</span></li>
+        <li><span class="m">০২</span><span>জবটা <b>Redis-এ কিউতে</b> ঢুকে যায়, ডিস্কে টিকে থাকে</span></li>
+        <li><span class="m">০৩</span><span><b>লগ রো</b> তৈরি হয়, কাউন্টার শূন্য দিয়ে শুরু</span></li>
+        <li><span class="m">০৪</span><span>অ্যাডমিন সাথে সাথে <b>200 OK</b> পায় — কাজ এখনো শুরুই হয়নি</span></li>
+        <li><span class="m">০৫</span><span>এখন সার্ভার ক্র্যাশ করলেও <b>জব Redis-এ বসে আছে</b>, রিস্টার্টে নিজেই চলবে</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 08 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">ধাপ ৩</div>
+    <h2 class="rv">দুইটা কিউ, দুইটা আলাদা ওয়ার্কার প্রসেস</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="node sig"><span class="nk">txQueue</span><span class="nn">এক ইউজার · অথবা সব ইউজার</span><span class="nd">backoff ১০s → ২০s → ৪০s · removeOnComplete ৫০০০</span></div>
+        <div class="node inf"><span class="nk">campaignQueue</span><span class="nn">কোর্স বা সাইকেল ভিত্তিক ব্রডকাস্ট</span><span class="nd">backoff ৬০s → ১২০s → ২৪০s · removeOnComplete ২০০০</span></div>
+        <div class="code inf"><span class="c">// ecosystem.config.cjs — PM2</span>
+{ name: <span class="s">"webapp-backend"</span>, instances: <span class="n">6</span>,
+  exec_mode: <span class="s">"cluster"</span> },
+{ name: <span class="s">"tx"</span>,      script: <span class="s">"worker.tx.js"</span> },
+{ name: <span class="s">"campain"</span>, script: <span class="s">"worker.campaign.js"</span> }</div>
+      </div>
+      <ul class="facts">
+        <li><b>API আর ওয়ার্কার এক প্রসেসে নয়</b> — ওয়ার্কার CPU খেলে ইউজারের রিকোয়েস্ট স্লো হবে না</li>
+        <li><b>আলাদা কিউ কেন</b> — একটা ৫ লাখের ক্যাম্পেইন চললে একটামাত্র ইউজারের চ্যাট নোটিফিকেশন যেন পেছনে আটকে না থাকে</li>
+        <li><b>আলাদা backoff</b> — ক্যাম্পেইন ফেল করলে ১ মিনিট পরে, ছোট জব ১০ সেকেন্ডেই</li>
+        <li><b>concurrency ৩০</b> — এক ওয়ার্কার একসাথে ৩০টা জব ধরে</li>
+        <li><b>ওয়ার্কার স্কেল করা সহজ</b> — লোড বাড়লে শুধু <span class="mono">pm2 scale campain 4</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 09 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">ধাপ ৪</div>
+    <h2 class="rv">Cursor Pagination — OFFSET ব্যবহার করিনি</h2>
+    <div class="cols wide-r rv">
+      <div class="stack">
+      <div class="vs">
+        <div class="lane slow">
+          <div class="lh"><span class="nm">skip: 495000  ❌</span><span class="rs">প্রতি পেজে আরও ধীর</span></div>
+          <div class="steps-bar">
+            <i style="height:12%"></i><i style="height:22%"></i><i style="height:34%"></i><i style="height:47%"></i>
+            <i style="height:60%"></i><i style="height:74%"></i><i style="height:87%"></i><i style="height:100%"></i>
+          </div>
+        </div>
+        <div class="lane">
+          <div class="lh"><span class="nm">cursor: { courseId_studentId }  ✅</span><span class="rs">প্রতি পেজ সমান দ্রুত</span></div>
+          <div class="steps-bar">
+            <i style="height:19%"></i><i style="height:20%"></i><i style="height:19%"></i><i style="height:21%"></i>
+            <i style="height:19%"></i><i style="height:20%"></i><i style="height:20%"></i><i style="height:19%"></i>
+          </div>
+        </div>
+      </div>
+        <ul class="facts">
+          <li><b>OFFSET মানে গোনা</b> — <span class="mono">skip: 495000</span>-এ Postgres ৪,৯৫,০০০ রো পড়ে, তারপর ফেলে দেয়</li>
+          <li><b>Cursor মানে লাফ</b> — ইনডেক্সে সরাসরি ওই পয়েন্টে বসে, শেষ পেজও প্রথম পেজের মতোই দ্রুত</li>
+          <li><b>generator ফাংশন</b> — মেমোরিতে একসাথে <b>৫০০০ আইডি</b>, পুরো ৫ লাখ কখনোই নয়</li>
+        </ul>
+      </div>
+      <div class="code inf"><span class="k">async function</span>* <span class="f">courseStudentIdPages</span>(courseId, pageSize = <span class="n">5000</span>) {
+  <span class="k">let</span> cursor = <span class="k">null</span>;
+  <span class="k">while</span> (<span class="k">true</span>) {
+    <span class="k">const</span> rows = <span class="k">await</span> prisma.courseStudent.<span class="f">findMany</span>({
+      where: { courseId },
+      orderBy: { studentId: <span class="s">"asc"</span> },
+      take: pageSize,
+      ...(cursor ? { cursor: { courseId_studentId: cursor },
+                     skip: <span class="n">1</span> } : {})
+    });
+    <span class="k">if</span> (!rows.length) <span class="k">return</span>;
+    <span class="k">yield</span> rows.<span class="f">map</span>(r =&gt; r.studentId);
+    cursor = { courseId, studentId: rows.<span class="f">at</span>(-<span class="n">1</span>).studentId };
+  }
+}</div>
+    </div>
+  </section>
+
+  <!-- ══ 10 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="26">
+    <div class="eyebrow rv">ধাপ ৫</div>
+    <h2 class="rv">৫০০-এর ব্যাচ — FCM-এর নিজের নিয়ম</h2>
+    <div class="cols wide-r rv">
+      <div class="stack">
+        <div class="swarm" data-dots="200" aria-hidden="true"></div>
+        <div class="chips">
+          <span class="chip"><b>৫,০০,০০০</b> টোকেন</span>
+          <span class="chip i">÷ <b>৫০০</b></span>
+          <span class="chip g">= <b>১,০০০</b> API কল</span>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="code"><span class="k">for</span> (<span class="k">const</span> part <span class="k">of</span> <span class="f">chunk</span>(tokens, <span class="n">500</span>)) {
+  <span class="k">const</span> res = <span class="k">await</span> admin.<span class="f">messaging</span>()
+    .<span class="f">sendEachForMulticast</span>({
+      tokens: part,
+      data: { …payload, deepLink, icon, badge, image },
+      android: { priority: <span class="s">"high"</span> },
+      apns:    { headers: { <span class="s">"apns-priority"</span>: <span class="s">"10"</span> } },
+      webpush: { headers: { TTL: <span class="s">"300"</span> } }
+    });
+
+  success += res.successCount;
+  failure += res.failureCount;
+}</div>
+        <ul class="facts sig">
+          <li><b>৫০০ হার্ড লিমিট</b> — Firebase-এর নিয়ম, একটাও বেশি নয়</li>
+          <li><b>sendEachForMulticast</b> — প্রতিটা টোকেনের আলাদা রেজাল্ট ফেরত দেয়, তাই কোনটা ফেল করল সেটা জানা যায়</li>
+          <li><b>notification নয়, data পেলোড</b> — অ্যাপ ব্যাকগ্রাউন্ডে থাকলেও নিজের হাতে নোটিফিকেশন আঁকা যায়</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 11 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">ধাপ ৬</div>
+    <h2 class="rv">থ্রটল — নিজেকেই গতি বেঁধে দেওয়া</h2>
+    <div class="cols rv">
+      <div class="valve">
+        <div class="hopper" data-dots="26" aria-hidden="true"></div>
+        <div class="gate"></div>
+        <div class="spill" data-drops="9" aria-hidden="true"></div>
+        <div class="readout" style="align-items:center">
+          <span class="v i">৫,০০০<span style="font-size:.4em"> /sec</span></span>
+          <span class="l">১০ ব্যাচ × ৫০০ টোকেন</span>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="code inf"><span class="k">const</span> throttle = <span class="f">createThrottle</span>({ maxBatchesPerSec: <span class="n">10</span> });
+
+<span class="k">for</span> <span class="k">await</span> (<span class="k">const</span> studentIds <span class="k">of</span> pager) {
+  <span class="k">const</span> tokens = <span class="k">await</span> <span class="f">getTokensByStudentIds</span>(studentIds);
+  <span class="k">if</span> (!tokens.length) <span class="k">continue</span>;
+
+  <span class="k">await</span> throttle.<span class="f">wait</span>();          <span class="c">// ← গতি নিয়ন্ত্রণ</span>
+  <span class="k">const</span> res = <span class="k">await</span> <span class="f">sendToTokens</span>(tokens, msg);
+}</div>
+        <ul class="facts">
+          <li><b>কেন নিজেকে থামানো</b> — FCM-এর কোটা আছে, ছাড়িয়ে গেলে গুগল রিকোয়েস্ট ফেরত দেবে</li>
+          <li><b>নিজের ডাটাবেজও বাঁচে</b> — প্রতি ব্যাচের আগে টোকেন কোয়েরি হয়, একসাথে ছুটলে Postgres বসে যাবে</li>
+          <li><b>হিসাবটা সহজ</b> — ৫,০০,০০০ ÷ ৫,০০০ = <b>১০০ সেকেন্ড</b>-এ পুরো ব্রডকাস্ট</li>
+          <li><b>টিউন করা যায়</b> — সার্ভার বড় হলে সংখ্যাটা বাড়িয়ে দিলেই সময় কমে</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 12 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">ধাপ ৭ · সবচেয়ে জরুরি</div>
+    <h2 class="rv">এক নোটিফিকেশন দুইবার যাবে না</h2>
+    <div class="cols rv">
+      <div class="gate-scene">
+        <div class="knocks">
+          <div class="knock pass">অ্যাডমিনের ১ম ক্লিক →</div>
+          <div class="knock block">২য় ক্লিক (ভুলে) →</div>
+          <div class="knock block">BullMQ রিট্রাই →</div>
+          <div class="knock block">২য় ওয়ার্কার →</div>
+        </div>
+        <div class="lockbox">
+          <div class="readout" style="align-items:center">
+            <span class="v i">SET NX</span>
+            <span class="l">Redis · atomic</span>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="code inf"><span class="c">// একই ইভেন্ট দুইবার কিউতে ঢুকবে না</span>
+<span class="k">export async function</span> <span class="f">dedupOnce</span>(key, ttlSec = <span class="n">900</span>) {
+  <span class="k">const</span> ok = <span class="k">await</span> redis.<span class="f">set</span>(<span class="s">`dedup:${key}`</span>, <span class="s">"1"</span>,
+                             <span class="s">"NX"</span>, <span class="s">"EX"</span>, ttlSec);
+  <span class="k">return</span> ok === <span class="s">"OK"</span>;
+}
+
+<span class="c">// একই জব দুই ওয়ার্কার একসাথে ধরবে না</span>
+<span class="k">export async function</span> <span class="f">acquireLock</span>(uniqueId, ttlSec = <span class="n">300</span>) {
+  <span class="k">return</span> (<span class="k">await</span> redis.<span class="f">set</span>(<span class="s">`lock:notification:${uniqueId}`</span>,
+          <span class="s">"1"</span>, <span class="s">"NX"</span>, <span class="s">"EX"</span>, ttlSec)) === <span class="s">"OK"</span>;
+}</div>
+        <ul class="facts">
+          <li><b>NX মানে</b> — key না থাকলেই কেবল লিখবে। Redis সিঙ্গেল থ্রেডেড, তাই এটা পুরোপুরি atomic</li>
+          <li><b>EX মানে</b> — নিজে থেকেই মুছে যাবে। ওয়ার্কার ক্র্যাশ করলেও লক চিরকাল আটকে থাকবে না</li>
+          <li><b>দুই স্তরের সুরক্ষা</b> — <span class="mono">dedup</span> কিউতে ঢোকার আগে, <span class="mono">lock</span> প্রসেস করার আগে</li>
+          <li><b>ভুল করলে কী হতো</b> — ৫ লাখ মানুষ একই মেসেজ দুইবার পেত, আর অ্যাপ আনইনস্টল করত</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 13 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="26">
+    <div class="eyebrow rv">ধাপ ৮</div>
+    <h2 class="rv">ফেল করলে নিজে নিজেই আবার চেষ্টা</h2>
+    <div class="cols wide-l rv">
+      <div class="stack">
+        <div class="retries">
+          <div class="retry"><span class="arc" style="width:calc(var(--u) * 3.4);height:calc(var(--u) * 3.4)"></span><span class="lbl">১০s</span></div>
+          <div class="retry"><span class="arc" style="width:calc(var(--u) * 5.2);height:calc(var(--u) * 5.2)"></span><span class="lbl">২০s</span></div>
+          <div class="retry"><span class="arc" style="width:calc(var(--u) * 7.4);height:calc(var(--u) * 7.4)"></span><span class="lbl">৪০s</span></div>
+          <div class="retry"><span class="lbl" style="color:var(--fail)">→ failed queue</span></div>
+        </div>
+        <div class="code"><span class="f">defaultJobOptions</span>: {
+  attempts: <span class="n">3</span>,
+  backoff:  { type: <span class="s">"exponential"</span>, delay: <span class="n">10_000</span> },
+  removeOnComplete: <span class="n">5000</span>,
+  removeOnFail:     <span class="n">10000</span>
+}</div>
+      </div>
+      <ul class="facts sig">
+        <li><b>exponential backoff</b> — প্রতিবার দ্বিগুণ অপেক্ষা। FCM সাময়িক ডাউন থাকলে তাকে শ্বাস নেওয়ার সময় দেওয়া</li>
+        <li><b>৩ বারেই থামা</b> — অসীম রিট্রাই মানে একটা বিষাক্ত জব চিরকাল ওয়ার্কার দখল করে রাখবে</li>
+        <li><b>removeOnComplete</b> — শেষ ৫০০০ জব রেখে বাকিটা মুছে যায়, নাহলে Redis-এর RAM ধীরে ধীরে শেষ</li>
+        <li><b>ফেল করা জব থেকে যায়</b> — ১০,০০০ পর্যন্ত, ডিবাগ করার জন্য</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 14 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="26">
+    <div class="eyebrow rv">ধাপ ৯</div>
+    <h2 class="rv">মরা টোকেন নিজে থেকেই ঝরে পড়ে</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="stream" data-tokens="96" aria-hidden="true"></div>
+        <div class="chips">
+          <span class="chip i"><b>valid</b> — পরের ক্যাম্পেইনে থাকবে</span>
+          <span class="chip r"><b>invalid</b> — কোয়েরিতেই আর আসবে না</span>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="code bad"><span class="k">const</span> code = r?.error?.code;
+
+<span class="k">if</span> (code === <span class="s">"messaging/registration-token-not-registered"</span> ||
+    code === <span class="s">"messaging/invalid-registration-token"</span>) {
+  invalidTokens.<span class="f">push</span>(part[i]);
+}
+
+<span class="c">// ওয়ার্কারে</span>
+<span class="k">await</span> prisma.pushNotification.<span class="f">updateMany</span>({
+  where: { token: { <span class="k">in</span>: invalidTokens } },
+  data:  { isValid: <span class="k">false</span> }
+});</div>
+        <ul class="facts bad">
+          <li><b>টোকেন মরে কেন</b> — অ্যাপ আনইনস্টল, ডেটা ক্লিয়ার, বা ৬ মাস ধরে অ্যাপ না খোলা</li>
+          <li><b>ডিলিট করি না</b> — <span class="mono">isValid = false</span>, যাতে কতজন অ্যাপ ছেড়ে গেছে সেই হিসাবটা থেকে যায়</li>
+          <li><b>নিজে থেকেই পরিষ্কার</b> — প্রতিটা ক্যাম্পেইন টোকেন টেবিলকে একটু একটু করে সুস্থ করে</li>
+          <li><b>খরচ বাঁচে</b> — মরা টোকেনে পাঠানো মানে অযথা API কল আর অযথা সময়</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 15 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="24">
+    <div class="eyebrow rv">ধাপ ১০</div>
+    <h2 class="rv">প্রতিটা ক্যাম্পেইনের পূর্ণ হিসাব</h2>
+    <div class="cols wide-r rv">
+      <div class="stack">
+        <div class="panel">
+          <div class="ptitle">notificationLogs · uniqueId দিয়ে মেলানো</div>
+          <div style="display:flex;gap:calc(var(--u) * 2.6)">
+            <div class="readout"><span class="v g">৪,৮২,১৩৭</span><span class="l">sendCount</span></div>
+            <div class="readout"><span class="v r">৩,৪১২</span><span class="l">failedCount</span></div>
+            <div class="readout"><span class="v">১৪,৪৫১</span><span class="l">invalidCount</span></div>
+          </div>
+        </div>
+        <div class="code"><span class="c">// worker.campaign.js</span>
+worker.<span class="f">on</span>(<span class="s">"completed"</span>, <span class="k">async</span> (job, result) =&gt; {
+  <span class="k">await</span> prisma.notificationLog.<span class="f">updateMany</span>({
+    where: { uniqueId: result.uniqueId },
+    data: {
+      sendCount:    { increment: result.sent },
+      failedCount:  { increment: result.failed },
+      invalidCount: { increment: result.invalid }
+    }
+  });
+});</div>
+      </div>
+      <ul class="facts">
+        <li><b>uuid-ই সেতু</b> — API যখন জব বানায় তখনই লগ রো বানায়, ওয়ার্কার শেষে সেই একই uuid দিয়ে খুঁজে নেয়</li>
+        <li><b>increment, set নয়</b> — একটা ক্যাম্পেইনের অনেক পেজ আলাদা আলাদা শেষ হয়, তাই যোগ হতে হবে</li>
+        <li><b>অ্যাডমিন ড্যাশবোর্ড</b> — raw SQL <span class="mono">COUNT(DISTINCT …) FILTER (WHERE isValid)</span> দিয়ে ইউনিক ইউজার, ভ্যালিড আর ইনভ্যালিডের সংখ্যা</li>
+        <li><b>এখান থেকেই বোঝা যায়</b> — কোন টাইটেল বেশি ক্লিক পেল, কখন পাঠালে মানুষ খোলে</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 16 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="36">
+    <div class="eyebrow rv">দ্বিতীয় অর্ধেক</div>
+    <h2 class="rv">ইন-অ্যাপ ফিড — ক্যাশ ইনভ্যালিডেট না করে ভার্সন বাড়ানো</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="keys">
+          <div class="keyrow dead">cache:notification:v1:list:student:a91…:frb:7c2f:<span class="g">g41</span>:u3</div>
+          <div class="keyrow dead">cache:notification:v1:list:student:b04…:frb:7c2f:<span class="g">g41</span>:u9</div>
+          <div class="keyrow live">cache:notification:v1:list:student:a91…:frb:7c2f:<span class="g">g42</span>:u3</div>
+        </div>
+        <div class="code inf"><span class="c">// নতুন নোটিফিকেশন গেলে — একটা মাত্র কমান্ড</span>
+<span class="k">await</span> redis.<span class="f">incr</span>(<span class="s">"cache:notification:v1:version:global"</span>);
+
+<span class="c">// ব্যস। পুরনো লাখ লাখ key এক মুহূর্তে অচল,</span>
+<span class="c">// কারণ কেউ আর ওই key-গুলো চাইবেই না।</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>সমস্যাটা আলাদা</b> — পুশ তো গেল, কিন্তু ইউজার অ্যাপ খুলে ঘণ্টার পর ঘণ্টা ওই লিস্টটা স্ক্রল করবে</li>
+        <li><b>DELETE করলে বিপদ</b> — ৫ লাখ ইউজারের key খুঁজে মুছতে <span class="mono">KEYS *</span> বা <span class="mono">SCAN</span> চালাতে হবে, Redis আটকে যাবে</li>
+        <li><b>ভার্সন বাড়ালেই যথেষ্ট</b> — key-এর নামেই ভার্সন বসানো, তাই <span class="mono">INCR</span>-এর পর পুরনো key আপনা-আপনি অনাথ হয়ে TTL-এ মরে যায়</li>
+        <li><b>দুইটা ভার্সন</b> — <span class="mono">global</span> সবার জন্য, <span class="mono">user</span> শুধু ওই একজনের (সে যখন "পড়েছি" মার্ক করে)</li>
+        <li><b>TTL ২০ সেকেন্ড + jitter</b> — সব key যেন এক সেকেন্ডে একসাথে এক্সপায়ার না করে</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 17 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">Cache Stampede</div>
+    <h2 class="rv">১০,০০০ জন একসাথে ফিড খুললে DB বাঁচবে?</h2>
+    <div class="cols wide-r rv">
+      <div class="stack">
+      <div class="funnel">
+        <div class="many" data-many="36" aria-hidden="true"></div>
+        <div class="wire" style="flex:0 0 calc(var(--u) * 4)"><i class="pkt t"></i><i class="pkt t d2"></i></div>
+        <div class="lockbox">
+          <div class="readout" style="align-items:center">
+            <span class="v i">১</span>
+            <span class="l">DB query</span>
+          </div>
+        </div>
+      </div>
+        <ul class="facts">
+          <li><b>লক ছাড়ার নিয়মও নিরাপদ</b> — Lua স্ক্রিপ্টে টোকেন মিলিয়ে DELETE, যাতে একজনের লক আরেকজন ছেড়ে না দেয়</li>
+          <li><b>heartbeat কেন</b> — লোডার ধীর হলে লক এক্সপায়ার করে দুইজন একসাথে ঢুকে পড়ত</li>
+          <li><b>Redis ডাউন হলে?</b> — সরাসরি DB থেকে পড়ে। ক্যাশ ফেল করলে ফিচার ফেল করে না</li>
+        </ul>
+      </div>
+      <div class="code inf"><span class="c">// ১. একই প্রসেসের ভেতর — in-memory single flight</span>
+<span class="k">return</span> <span class="f">singleFlight</span>(<span class="s">`cold:${key}`</span>, <span class="k">async</span> () =&gt; {
+
+  <span class="c">// ২. প্রসেসের বাইরে — Redis distributed lock</span>
+  <span class="k">const</span> lock = <span class="k">await</span> <span class="f">acquireLock</span>(<span class="s">`lock:${key}`</span>, lockTtlMs);
+
+  <span class="k">if</span> (lock) {
+    <span class="f">startLockHeartbeat</span>(lock, lockTtlMs);   <span class="c">// PEXPIRE বাড়ায়</span>
+    <span class="k">return</span> <span class="k">await</span> <span class="f">loadAndCache</span>({ key, loader });
+  }
+
+  <span class="c">// ৩. বাকিরা অপেক্ষা করে, DB-তে যায় না</span>
+  <span class="k">while</span> (Date.<span class="f">now</span>() &lt; deadline) {
+    <span class="k">await</span> <span class="f">sleep</span>(<span class="f">randomBetween</span>(<span class="n">40</span>, <span class="n">100</span>));
+    <span class="k">const</span> cached = <span class="k">await</span> <span class="f">readCache</span>(key);
+    <span class="k">if</span> (cached.state !== <span class="s">"miss"</span>) <span class="k">return</span> cached.value;
+  }
+});</div>
+    </div>
+  </section>
+
+  <!-- ══ 18 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="22">
+    <div class="eyebrow rv">রক্ষণাবেক্ষণ</div>
+    <h2 class="rv">প্রতিদিন রাতে নিজে নিজেই পরিষ্কার</h2>
+    <div class="cols wide-l rv">
+      <div class="stack">
+        <div class="code"><span class="c">// প্রতিদিন রাত ১২টা ০৫ মিনিটে</span>
+cron.<span class="f">schedule</span>(<span class="s">"5 0 * * *"</span>, deleteOldNotifications);
+
+<span class="k">await</span> prisma.$<span class="f">transaction</span>(<span class="k">async</span> (tx) =&gt; {
+  <span class="k">await</span> tx.notificationUserStatus.<span class="f">deleteMany</span>({
+    where: { createdAt: { lt: cutoffDate } }      <span class="c">// ৭ দিন</span>
+  });
+  <span class="k">await</span> tx.notificationLog.<span class="f">deleteMany</span>({
+    where: { createdAt: { lt: cutoffDate } }
+  });
+});
+
+<span class="k">await</span> <span class="f">bumpNotificationGlobalVersion</span>();   <span class="c">// ক্যাশও ধুয়ে যায়</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>৭ দিনের পুরনো সব মুছে যায়</b> — নোটিফিকেশন ফিড আর্কাইভ নয়, সাম্প্রতিক খবরের জায়গা</li>
+        <li><b>ট্রানজেকশনে</b> — status আগে, log পরে। মাঝপথে ফেল করলে কিছুই মুছবে না</li>
+        <li><b>ডিলিটের পরেই ভার্সন বাড়ানো</b> — নাহলে ক্যাশে এমন নোটিফিকেশন থেকে যেত যেটা DB-তে আর নেই</li>
+        <li><b>টেবিল ছোট থাকে</b> — ইনডেক্স হালকা, কোয়েরি দ্রুত, ডিস্কের বিল কম</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 19 ══════════════════════════════════════════════ -->
+  <section class="slide s-hero" data-dur="30">
+    <div class="tower" aria-hidden="true">
+      <span class="ring"></span><span class="ring"></span><span class="ring"></span><span class="ring"></span>
+      <div class="orbit">
+        <i style="left:6%;top:48%"></i><i style="left:92%;top:40%"></i>
+        <i style="left:48%;top:4%"></i><i style="left:52%;top:94%"></i>
+      </div>
+      <span class="core"></span>
+    </div>
+    <div class="eyebrow">ফলাফল</div>
+    <h2 style="font-size:calc(var(--u) * 3.6);max-width:20ch">একটা VPS, একটা Redis — আর পুরো দেশ</h2>
+    <div style="display:flex;gap:calc(var(--u) * 3.4);margin-top:calc(var(--u) * 1.2)">
+      <div class="readout"><span class="v">~১০০s</span><span class="l">৫ লাখ ডিভাইস</span></div>
+      <div class="readout"><span class="v i">~৪০ms</span><span class="l">API রেসপন্স</span></div>
+      <div class="readout"><span class="v g">৳০</span><span class="l">FCM বিল</span></div>
+    </div>
+    <ul class="facts" style="max-width:56ch;margin-top:calc(var(--u) * .6)">
+      <li><b>কিউ = নিরাপত্তা</b> — সার্ভার ক্র্যাশ করলেও একটা নোটিফিকেশনও হারায় না</li>
+      <li><b>ব্যাচ + থ্রটল = গতি</b> — ধাক্কা না দিয়ে, মেপে মেপে</li>
+      <li><b>Redis লক = বিশ্বাস</b> — কেউ একই মেসেজ দুইবার পায় না</li>
+      <li><b>ভার্সন ক্যাশ = স্কেল</b> — ফিড লোড ডাটাবেজে যায়ই না</li>
+    </ul>
+  </section>
+
+  <div class="bar"><i id="progress"></i></div>
+  <div class="hint" id="hint">
+    <span><b>← →</b> স্লাইড</span>
+    <span><b>A</b> অটোপ্লে</span>
+    <span><b>N</b> স্ক্রিপ্ট</span>
+    <span><b>F</b> ফুলস্ক্রিন</span>
+  </div>
+
+  <aside class="prompt" id="prompt" aria-live="polite">
+    <div class="ph" id="promptHead">স্লাইড ০১</div>
+    <p class="pt" id="promptText"></p>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const deck    = document.getElementById("deck");
+  const slides  = [...deck.querySelectorAll(".slide")];
+  const rail    = document.getElementById("rail");
+  const bar     = document.getElementById("progress");
+  const slideNo = document.getElementById("slideNo");
+  const prompt  = document.getElementById("prompt");
+  const pHead   = document.getElementById("promptHead");
+  const pText   = document.getElementById("promptText");
+  const hint    = document.getElementById("hint");
+
+  /* ---- teleprompter: what to say on each slide ---- */
+  const script = [
+    "আসসালামু আলাইকুম। আজকে আমি দেখাবো — একটা ব্যাকএন্ড থেকে <em>পাঁচ লাখ ইউজারকে</em> পুশ নোটিফিকেশন পাঠানো যায় কীভাবে, আর সেটা <em>একদম ফ্রিতে</em>। এটা কোনো থিওরি না — এটা আমার প্রোডাকশনে চলা কোড। Firebase, BullMQ, Redis আর PostgreSQL — চারটা টুল দিয়ে পুরো পাইপলাইনটা কীভাবে দাঁড়ালো, আর প্রতিটা জায়গায় কেন এই সিদ্ধান্তটা নিলাম, সেটাই বলবো।",
+    "শুরু করি সমস্যাটা দিয়ে। প্রায় সবাই প্রথমে এই কোডটাই লেখে — সব ইউজার নিয়ে আসো, একটা লুপ চালাও, পাঠাও। কিন্তু হিসাবটা করো — এক একটা FCM কলে দুইশো মিলিসেকেন্ড ধরলে, পাঁচ লাখ ইউজারে দাঁড়ায় <em>প্রায় সাতাশ ঘণ্টা</em>। এদিকে Nginx তোমার রিকোয়েস্ট ত্রিশ সেকেন্ডেই কেটে দেবে। তার আগেই findMany পাঁচ লাখ রো RAM-এ তুলে সার্ভার বসিয়ে দেবে। আর FCM এক কলে পাঁচশোর বেশি টোকেন নেবেই না। সবচেয়ে খারাপ ব্যাপারটা হলো — মাঝপথে সার্ভার রিস্টার্ট হলে কে পেয়েছে আর কে পায়নি, তার <em>কোনো রেকর্ডই থাকবে না</em>।",
+    "এখন প্রশ্ন — Firebase কেন? কারণ FCM-এ মেসেজের কোনো বিল নেই। শূন্য। SMS দিয়ে একই ক্যাম্পেইন পাঠাতে গেলে, প্রতি SMS ত্রিশ পয়সা ধরলেও পাঁচ লাখে দাঁড়ায় <em>দেড় লাখ টাকা</em> — প্রতিবার। FCM-এ সেটা <em>শূন্য টাকা</em>। তোমার আসল খরচ শুধু একটা VPS আর একটা Redis। Android, iOS, ওয়েব — তিনটাই এক পেলোডে। আর ফোন অফলাইনে থাকলে গুগল নিজে ধরে রাখে, অন হলে পৌঁছে দেয়। শর্ত একটাই — প্রতি কলে পাঁচশো টোকেন। এই একটা লিমিটের ওপরেই পুরো ডিজাইনটা দাঁড়িয়ে আছে।",
+    "এই যে পুরো আর্কিটেকচার। বাঁ দিক থেকে ডানে পড়ো। অ্যাডমিন প্যানেল থেকে রিকোয়েস্ট আসে API-তে — PM2-তে ছয়টা ইনস্ট্যান্স চলে। API <em>নিজে কিছুই পাঠায় না</em>, শুধু Redis-এ একটা জব ঢুকিয়ে দেয়। BullMQ সেই জব ধরে রাখে। আলাদা ওয়ার্কার প্রসেস সেটা তুলে নেয়, ইউজারদের পেজ পেজ করে বের করে, পাঁচশোর ব্যাচ বানায়, থ্রটল করে FCM-এ পাঠায়, আর FCM ফোনে পৌঁছে দেয়। নিচে দেখো — PostgreSQL-এ থাকে কী পাঠানো হলো আর কে দেখলো, আর Redis ক্যাশে থাকে ইন-অ্যাপ ফিড। এই ছবিটা মাথায় রাখো, এখন এক এক করে প্রতিটা বক্সে ঢুকবো।",
+    "প্রথম ধাপ — ডিভাইস রেজিস্ট্রেশন। অ্যাপ খুললেই FCM একটা টোকেন দেয়, সেটা আমার সার্ভারে পাঠিয়ে দিই। এখানে সবচেয়ে জরুরি সিদ্ধান্ত — <em>token কলামটা unique</em>, আর আমি create না করে <em>upsert</em> করি। কারণ অ্যাপ রিইনস্টল হলে বা টোকেন রিফ্রেশ হলে একই ডিভাইসের জন্য নতুন রো তৈরি হয়ে যেত, আর একজন ইউজার একই নোটিফিকেশন দশবার পেত। আরেকটা জিনিস — টোকেন মরে গেলে আমি রো ডিলিট করি না, শুধু isValid ফলস করে দিই। ডেটা মুছে ফেলা সহজ, কিন্তু তারপর আর জানা যায় না কতজন অ্যাপ ছেড়ে গেছে।",
+    "ডাটাবেজ ডিজাইনটা তিন টেবিলে ভাগ করেছি, কারণ তিনটা আলাদা প্রশ্নের উত্তর লাগে। pushNotifications বলে — <em>কোন ডিভাইসে</em> পাঠাবো। notificationLogs বলে — <em>কী</em> পাঠিয়েছি, আর কতজনের কাছে গেল। আর notificationUserStatus বলে — <em>কে দেখলো, কে ক্লিক করলো</em>। এখানে একটা ট্র্যাপ আছে যেটাতে অনেকে পড়ে। এক নোটিফিকেশনের জন্য যদি পাঁচ লাখ ইউজারের পাঁচ লাখ রো বানাও, তাহলে দশটা নোটিফিকেশনেই পঞ্চাশ লাখ রো। তাই ক্যাম্পেইনের রেকর্ড রাখি <em>একটাই</em>, আর per-user রো তৈরি হয় শুধু তখনই যখন কেউ আসলেই সেটা দেখে।",
+    "এখন পুরো সিস্টেমের সবচেয়ে গুরুত্বপূর্ণ সিদ্ধান্ত — <em>API কখনোই নোটিফিকেশন পাঠায় না</em>। API চারটা কাজ করে: একটা uuid বানায়, জবটা কিউতে ঢুকিয়ে দেয়, ডাটাবেজে একটা লগ রো বানায়, আর দুইশো OK ফেরত দেয়। ব্যস। পুরোটা <em>চল্লিশ মিলিসেকেন্ডে</em>। মজার ব্যাপারটা খেয়াল করো — একজনকে পাঠাও বা পাঁচ লাখকে, API-এর রেসপন্স টাইম <em>একই</em>, কারণ কাজটা তখনও শুরুই হয়নি। আর এখন সার্ভার ক্র্যাশ করলেও ভয় নেই — জবটা Redis-এ বসে আছে, প্রসেস ফিরে এলে নিজেই আবার চালু হবে।",
+    "কিউ আমি দুইটা রেখেছি। txQueue — একজন ইউজার, বা সব ইউজার। আর campaignQueue — কোর্স বা সাইকেল ভিত্তিক ব্রডকাস্ট। কেন আলাদা? ভাবো, পাঁচ লাখের একটা ক্যাম্পেইন চলছে। ঠিক তখন একজন স্টুডেন্ট একটা চ্যাট মেসেজ পেল। এক কিউতে থাকলে ওই চ্যাট নোটিফিকেশন <em>একশো সেকেন্ড পেছনে</em> আটকে থাকতো। আর PM2 কনফিগটা দেখো — API আর ওয়ার্কার <em>সম্পূর্ণ আলাদা প্রসেস</em>। ওয়ার্কার CPU খেয়ে ফেললেও ইউজারের রিকোয়েস্ট স্লো হবে না। লোড বাড়লে শুধু pm2 scale করে ওয়ার্কার বাড়িয়ে দিলেই হলো।",
+    "এবার ওয়ার্কারের ভেতরে ঢুকি। পাঁচ লাখ ইউজারকে বের করবো কীভাবে? সাধারণ পেজিনেশন, মানে skip আর take — এখানে <em>ভয়ংকর</em>। কারণ skip পাঁচ লাখ মানে Postgres আসলে চার লাখ পঁচানব্বই হাজার রো <em>পড়ে, তারপর ফেলে দেয়</em>। প্রতিটা পরের পেজ আগেরটার চেয়ে ধীর — বাঁ দিকের লাল বারগুলো সেটাই দেখাচ্ছে। তাই কার্সর পেজিনেশন। শেষ যে আইডিতে ছিলাম, পরের কোয়েরিতে সরাসরি সেই পয়েন্টে ইনডেক্সে বসে পড়ি। শেষ পেজও প্রথম পেজের মতোই দ্রুত। আর লক্ষ্য করো — এটা একটা <em>generator ফাংশন</em>, তাই মেমোরিতে একসাথে পাঁচ হাজার আইডি থাকে, পুরো পাঁচ লাখ কখনোই না।",
+    "পাঁচ হাজার আইডি পেলাম, তাদের টোকেন বের করলাম। কিন্তু FCM এক কলে <em>পাঁচশোর</em> বেশি নেবে না — এটা Firebase-এর হার্ড লিমিট। তাই chunk ফাংশন দিয়ে পাঁচশো করে ভাগ করি। সহজ হিসাব — পাঁচ লাখ ভাগ পাঁচশো, সমান <em>এক হাজার</em> API কল। আর আমি sendEachForMulticast ব্যবহার করি, কারণ এটা <em>প্রতিটা টোকেনের আলাদা রেজাল্ট</em> ফেরত দেয় — কোনটা গেল, কোনটা ফেল করলো, সব জানা যায়। আরেকটা জিনিস — আমি notification নয়, <em>data পেলোড</em> পাঠাই, যাতে অ্যাপ ব্যাকগ্রাউন্ডে থাকলেও নোটিফিকেশনটা আমি নিজের মতো করে আঁকতে পারি।",
+    "এখন একটা পাল্টা প্রশ্ন — এক হাজার কল যদি একসাথেই ছেড়ে দিই, দশ সেকেন্ডেই তো শেষ? না। দুইটা কারণে। এক, FCM-এর কোটা আছে — ছাড়িয়ে গেলে গুগল রিকোয়েস্ট ফিরিয়ে দেবে। দুই, প্রতিটা ব্যাচের আগে আমি ডাটাবেজে টোকেন কোয়েরি করি — একসাথে ছুটলে <em>নিজের Postgres-ই বসে যাবে</em>। তাই একটা ছোট থ্রটল লিখেছি: সেকেন্ডে সর্বোচ্চ <em>দশ ব্যাচ</em>। দশ গুণ পাঁচশো, মানে সেকেন্ডে <em>পাঁচ হাজার</em> নোটিফিকেশন। পাঁচ লাখ ভাগ পাঁচ হাজার — <em>একশো সেকেন্ড</em>। এটাই আমার আসল থ্রুপুট। সার্ভার বড় হলে সংখ্যাটা বাড়িয়ে দিলেই সময় কমে যাবে।",
+    "এবার সেই জায়গাটা, যেখানে ভুল করলে ইউজার অ্যাপ আনইনস্টল করে দেয় — <em>ডুপ্লিকেট</em>। তিনটা রাস্তায় ডুপ্লিকেট আসতে পারে: অ্যাডমিন ভুলে দুইবার ক্লিক করলো, BullMQ টাইমআউট ভেবে রিট্রাই করলো, অথবা দুইটা ওয়ার্কার একই জব তুলে নিলো। সমাধান Redis-এর একটা কমান্ড — <em>SET key value NX EX</em>। NX মানে, key না থাকলেই কেবল লিখবে। Redis সিঙ্গেল থ্রেডেড, তাই এটা পুরোপুরি atomic — <em>শুধু প্রথমজনই OK পায়</em>, বাকিরা null। আর EX মানে নিজে থেকেই মুছে যাবে, তাই ওয়ার্কার ক্র্যাশ করলেও লক চিরকাল আটকে থাকবে না। আমি দুই স্তরে লাগিয়েছি — dedup কিউতে ঢোকার আগে, আর lock প্রসেস করার আগে।",
+    "রিট্রাই। BullMQ-কে বলে দিয়েছি — attempts তিন, backoff exponential। মানে ফেল করলে দশ সেকেন্ড, তারপর বিশ, তারপর চল্লিশ। কেন দ্বিগুণ করে বাড়ে? কারণ FCM সাময়িকভাবে ডাউন থাকলে সাথে সাথে আবার হামলা করলে অবস্থা আরও খারাপ হয় — তাকে <em>শ্বাস নেওয়ার সময়</em> দিতে হয়। আর তিন বারেই কেন থামি? কারণ অসীম রিট্রাই মানে একটা বিষাক্ত জব চিরকাল ওয়ার্কার দখল করে বসে থাকবে। removeOnComplete-টাও খেয়াল করো — সফল জব শেষ পাঁচ হাজার রেখে বাকিটা মুছে যায়, নাহলে Redis-এর মেমোরি ধীরে ধীরে শেষ হয়ে যেত।",
+    "প্রতিটা রেসপন্সে FCM বলে দেয় কোন টোকেন আর নেই। দুইটা এরর কোড খুঁজি — registration-token-not-registered আর invalid-registration-token। এগুলো মানে অ্যাপ আনইনস্টল হয়েছে, ডেটা ক্লিয়ার হয়েছে, বা অনেকদিন অ্যাপ খোলা হয়নি। সেগুলো জমিয়ে এক updateMany-তে isValid ফলস করে দিই। ফলাফল — <em>পরের ক্যাম্পেইনে ওই টোকেন কোয়েরিতেই আসবে না</em>। মানে প্রতিটা ক্যাম্পেইন আমার টোকেন টেবিলকে একটু একটু করে সুস্থ করে তোলে। এটা না করলে ছয় মাস পর তোমার অর্ধেক টোকেনই মরা, আর তুমি অযথা API কল করে সময় নষ্ট করছো।",
+    "হিসাব রাখাটাও অটোমেটিক। ওয়ার্কার যখন একটা জব শেষ করে, completed ইভেন্টে সে ফেরত দেয় — কতগুলো গেল, কতগুলো ফেল করলো, কতগুলো ইনভ্যালিড। সেই uuid দিয়ে notificationLogs-এর রো খুঁজে কাউন্টার আপডেট হয়। এখানে একটা ছোট কিন্তু জরুরি ডিটেইল — আমি <em>increment</em> ব্যবহার করি, set না। কারণ একটা ক্যাম্পেইনের অনেকগুলো পেজ আলাদা আলাদা সময়ে শেষ হয়, তাই সংখ্যাগুলো <em>যোগ</em> হতে হবে। আর অ্যাডমিন ড্যাশবোর্ডে raw SQL দিয়ে দেখাই — কতজন ইউনিক ইউজার, কতজনের টোকেন ভ্যালিড, কতজনের ইনভ্যালিড।",
+    "এতক্ষণ ছিল পুশ পাঠানো। কিন্তু কাজ শেষ না। ইউজার অ্যাপ খুলে <em>নোটিফিকেশন লিস্টটা</em> দেখবে, স্ক্রল করবে, বারবার রিফ্রেশ করবে। এটা সম্পূর্ণ আলাদা একটা লোড। এখানে ক্যাশ লাগবেই, কিন্তু সমস্যা হলো — নতুন নোটিফিকেশন এলে পাঁচ লাখ ইউজারের ক্যাশ key কীভাবে মুছবে? KEYS বা SCAN চালালে Redis আটকে যাবে। তাই আমি <em>মুছিই না</em>। ক্যাশ key-এর নামের ভেতরেই একটা ভার্সন নাম্বার বসিয়ে দিয়েছি। নতুন নোটিফিকেশন গেলে শুধু <em>INCR</em> — ব্যস, পুরনো key-গুলো এক মুহূর্তে অনাথ হয়ে যায়, কেউ আর ওগুলো চায়ই না, আর TTL শেষ হলে নিজেরাই মরে যায়। ভার্সন দুই রকম — global সবার জন্য, আর user শুধু ওই একজনের।",
+    "শেষ টেকনিক্যাল অংশ — cache stampede। ধরো ক্যাশ এইমাত্র এক্সপায়ার করলো, আর ঠিক সেই মুহূর্তে দশ হাজার ইউজার ফিড খুললো। সবাই মিস পাবে, সবাই ডাটাবেজে যাবে — <em>দশ হাজার একই কোয়েরি</em>। ডাটাবেজ শেষ। আমি তিন স্তরে আটকেছি। এক, একই প্রসেসের ভেতর singleFlight — একটা promise সবাই শেয়ার করে। দুই, প্রসেসের বাইরে Redis distributed lock — <em>একজনই</em> লক পায়, সেই একজনই DB-তে যায়। তিন, বাকিরা চল্লিশ থেকে একশো মিলিসেকেন্ড পরপর ক্যাশ চেক করতে থাকে, ভরে গেলেই নিয়ে নেয়। লক ছাড়ি Lua স্ক্রিপ্টে টোকেন মিলিয়ে, যাতে একজনের লক আরেকজন ভুল করে ছেড়ে না দেয়। আর Redis পুরো ডাউন হলে? পুরোটা ধরা পড়ে সরাসরি DB থেকে পড়ে — <em>ক্যাশ ফেল করলেও ফিচার ফেল করে না</em>।",
+    "আর একটা ছোট কিন্তু দরকারি জিনিস — প্রতিদিন রাত বারোটা পাঁচে একটা cron চলে, সাত দিনের পুরনো নোটিফিকেশন আর তাদের স্ট্যাটাস রো ডিলিট করে দেয়। নোটিফিকেশন ফিড কোনো আর্কাইভ না, এটা সাম্প্রতিক খবরের জায়গা। পুরোটা একটা ট্রানজেকশনে, তাই মাঝপথে ফেল করলে কিছুই মুছবে না। আর ডিলিটের ঠিক পরেই global ভার্সন বাড়িয়ে দিই — নাহলে ক্যাশে এমন নোটিফিকেশন থেকে যেত যেটা ডাটাবেজে আর নেই।",
+    "তাহলে দাঁড়ালো কী? পাঁচ লাখ ডিভাইসে পুরো ব্রডকাস্ট <em>একশো সেকেন্ডে</em>। API রেসপন্স <em>চল্লিশ মিলিসেকেন্ড</em> — একজন হোক বা পাঁচ লাখ। FCM-এর বিল <em>শূন্য টাকা</em>। সব মিলিয়ে একটা VPS আর একটা Redis। চারটা কথা মনে রাখো — কিউ দেয় নিরাপত্তা, ব্যাচ আর থ্রটল দেয় গতি, Redis লক দেয় বিশ্বাস, আর ভার্সন ক্যাশ দেয় স্কেল। ভিডিওটা ভালো লাগলে লাইক দিও, আর তোমার সিস্টেমে কোন জায়গায় আটকে আছো কমেন্টে লিখো — পরের ভিডিওতে সেটা নিয়েই বসবো। ধন্যবাদ।"
+  ];
+
+  /* ---- fill generated dot fields ---- */
+  const fill = (sel, attr, cls, style) => {
+    deck.querySelectorAll(sel).forEach((host) => {
+      const n = +host.dataset[attr];
+      let html = "";
+      for (let i = 0; i < n; i++) html += style ? style(i) : `<i${cls ? ` class="${cls(i)}"` : ""}></i>`;
+      host.innerHTML = html;
+    });
+  };
+  fill(".swarm", "dots", null, (i) => `<i style="animation-delay:${(i % 25) * 0.045 + Math.floor(i / 25) * 0.09}s"></i>`);
+  fill(".stream", "tokens", null, (i) => `<i class="${i % 7 === 3 ? "dead" : ""}" style="animation-delay:${(i % 12) * 0.12}s"></i>`);
+  fill(".many", "many", null, () => "<i></i>");
+  fill(".hopper", "dots", null, (i) =>
+    `<i style="left:${8 + (i % 9) * 10}%;top:${12 + Math.floor(i / 9) * 26}%"></i>`);
+  fill(".spill", "drops", null, (i) =>
+    `<i style="left:${10 + i * 9}%;animation-delay:${(i * 0.17).toFixed(2)}s"></i>`);
+
+  /* ---- rail ---- */
+  slides.forEach(() => rail.insertAdjacentHTML("beforeend", '<span class="tick"></span>'));
+  const ticks = [...rail.children];
+
+  /* ---- navigation ---- */
+  let idx = 0;
+  let auto = false;
+  let timer = null;
+  const bn = (n) => String(n).replace(/\d/g, (d) => "০১২৩৪৫৬৭৮৯"[d]);
+
+  function show(next) {
+    idx = (next + slides.length) % slides.length;
+    slides.forEach((s, i) => s.classList.toggle("is-active", i === idx));
+    ticks.forEach((t, i) => {
+      t.classList.toggle("on", i === idx);
+      t.classList.toggle("done", i < idx);
+    });
+    bar.style.width = ((idx + 1) / slides.length) * 100 + "%";
+    slideNo.textContent = `${bn(String(idx + 1).padStart(2, "0"))} / ${bn(slides.length)}`;
+    pHead.textContent = `স্লাইড ${bn(String(idx + 1).padStart(2, "0"))} — যা বলবেন`;
+    pText.innerHTML = script[idx] || "";
+    if (auto) queue();
+  }
+
+  function queue() {
+    clearTimeout(timer);
+    const dur = (+slides[idx].dataset.dur || 24) * 1000;
+    timer = setTimeout(() => show(idx + 1), dur);
+  }
+
+  function toggleAuto() {
+    auto = !auto;
+    hint.classList.toggle("is-hidden", auto);
+    if (auto) queue(); else clearTimeout(timer);
+  }
+
+  document.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (k === "arrowright" || k === " " || k === "pagedown") { e.preventDefault(); clearTimeout(timer); show(idx + 1); }
+    else if (k === "arrowleft" || k === "pageup") { e.preventDefault(); clearTimeout(timer); show(idx - 1); }
+    else if (k === "a") toggleAuto();
+    else if (k === "n") prompt.classList.toggle("open");
+    else if (k === "f") { document.fullscreenElement ? document.exitFullscreen() : deck.requestFullscreen?.(); }
+    else if (k === "home") show(0);
+    else if (k === "end") show(slides.length - 1);
+    else if (k === "escape") prompt.classList.remove("open");
+  });
+
+  deck.addEventListener("click", (e) => {
+    if (e.target.closest(".prompt")) return;
+    clearTimeout(timer);
+    show(idx + (e.clientX < deck.getBoundingClientRect().left + deck.clientWidth * 0.24 ? -1 : 1));
+  });
+
+  show(0);
+})();
+</script>
