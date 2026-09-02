@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "quoras" ADD COLUMN     "asgshop" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "solver" INTEGER NOT NULL DEFAULT 0;

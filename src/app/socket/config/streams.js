@@ -1,0 +1,17 @@
+import { SOCKET_EVENTS } from "../events.js";
+
+export const CHAT_WORKER = {
+  STREAM: SOCKET_EVENTS.WORKER_CHAT_MESSAGE,
+
+  GROUP: SOCKET_EVENTS.CHAT_GROUP,
+
+  CONSUMER: process.env.WORKER_NAME || `worker-${process.pid}`,
+
+  COUNT: 200,
+
+  BLOCK: 5000,
+
+  MIN_IDLE: 30000,
+
+  DEAD_LETTER: `${SOCKET_EVENTS.WORKER_CHAT_MESSAGE}:dead`,
+};

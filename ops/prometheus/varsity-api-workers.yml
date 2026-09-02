@@ -1,0 +1,14 @@
+# Add this job under scrape_configs in /etc/prometheus/prometheus.yml.
+# Each PM2 cluster worker exposes a private registry on its own loopback port.
+- job_name: varsity-api-workers
+  scrape_interval: 15s
+  static_configs:
+    - targets:
+        - 127.0.0.1:9464
+        - 127.0.0.1:9465
+        - 127.0.0.1:9466
+        - 127.0.0.1:9467
+        - 127.0.0.1:9468
+        - 127.0.0.1:9469
+      labels:
+        service: varsity-api

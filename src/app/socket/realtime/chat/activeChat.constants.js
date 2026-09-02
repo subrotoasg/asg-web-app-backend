@@ -1,0 +1,4 @@
+export const CHAT_RETENTION_DAYS = 5;
+export const CHAT_DELETE_BATCH_SIZE = 5000;
+export const CHAT_DELETE_BATCH_DELAY_MS = 200;
+export const CHAT_DELETE_MAX_RUNTIME_MS = 20 * 60 * 1000;

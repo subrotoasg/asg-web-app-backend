@@ -1,0 +1,39 @@
+# Node modules
+node_modules/
+
+nodemon.json
+
+# dbScriptHelper.js
+
+main-page.html
+
+raw-response.html
+
+# Log files
+*.log
+*.txt
+
+# Environment files
+.env
+.env.local
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Development tools
+.nodemon.json
+debug.log
+.vscode/
+.idea/
+
+# Test files
+coverage/
+*.test.js
+
+# Build files
+dist/
+build/
+.vercel
+
+docs/

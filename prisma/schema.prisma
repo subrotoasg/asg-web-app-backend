@@ -1,0 +1,1762 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("POSTGRES_DATABASE_URL")
+  directUrl = env("POSTGRES_DIRECT_URL")
+}
+
+model AsgWebApp {
+  id        Int      @id @default(autoincrement())
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+}
+
+model superAdmin {
+  id                     String                   @id @unique @default(uuid()) @db.Uuid
+  email                  String                   @unique
+  phone                  String                   @unique
+  photo                  String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  otp                    String?
+  otpExpiry              DateTime?
+  refreshToken           String?
+  role                   Role?                    @default(superAdmin)
+  admin                  admin[]
+  issueTag               issueTag[]
+  courseAdmin            courseAdmin[]
+  course                 course[]
+  solver                 solver[]
+  subject                subject[]
+  notificationLogs       notificationLog[]
+  IssueTrack             IssueTrack[]
+  superAdminXStudentInfo superAdminXStudentInfo[]
+
+  //browser info
+  ip                  String?
+  userAgent           String?
+  browserName         String?
+  browserVersion      String?
+  osName              String?
+  osVersion           String?
+  deviceType          String?
+  deviceModel         String?
+  deviceVendor        String?
+  cpuArchitecture     String?
+  engineName          String?
+  engineVersion       String?
+  fp                  String?
+  downloadStudentInfo DateTime?
+  activeChats         activeChat[]
+
+  @@index([email, phone])
+  @@index([email])
+  @@index([phone])
+  @@map("superAdmin")
+}
+
+model superAdminXStudentInfo {
+  id               String      @id @unique @default(uuid()) @db.Uuid
+  superAdminId     String?     @db.Uuid
+  superAdmin       superAdmin? @relation(fields: [superAdminId], references: [id])
+  courseOrCycleId  String?
+  lastDownloadTime DateTime?
+
+  @@index([superAdminId, courseOrCycleId])
+}
+
+model otpAttempts {
+  id        String    @id @unique @default(uuid()) @db.Uuid
+  email     String?
+  phone     String?
+  count     Int       @default(0)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  otp       String? //used for signup otp verification
+  otpExpiry DateTime? //used for sugnup otp verification
+}
+
+model admin {
+  id                String    @id @unique @default(uuid()) @db.Uuid
+  email             String    @unique
+  phone             String    @unique
+  name              String?
+  photo             String?
+  status            Status    @default(ACTIVE)
+  password          String
+  refreshToken      String?
+  isDeleted         Boolean   @default(false)
+  isPasswordChange  Boolean   @default(false)
+  passwordChangedAt DateTime?
+  superAdminId      String?   @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  adminId           String?   @db.Uuid
+  role              Role?     @default(admin)
+  anotherRole       String? //teacher/co-teacher/cx/studio
+  //browser info
+  ip                String?
+  userAgent         String?
+  browserName       String?
+  browserVersion    String?
+  osName            String?
+  osVersion         String?
+  deviceType        String?
+  deviceModel       String?
+  deviceVendor      String?
+  cpuArchitecture   String?
+  engineName        String?
+  engineVersion     String?
+  fp                String?
+
+  superAdmin                  superAdmin?                 @relation(fields: [superAdminId], references: [id])
+  classComment                classComment[]
+  classContent                classContent[]
+  courseAdmin                 courseAdmin[]
+  cycleContent                cycleContent[]
+  cycleSubjectChapter         cycleSubjectChapter[]
+  cycleSubject                cycleSubject[]
+  cycle                       cycle[]
+  featured                    featured[]
+  liveClass                   liveClass[]
+  noticeORroutine             noticeORroutine[]
+  courseSubject               courseSubject[]
+  classLike                   classLike[]
+  pushNotification            pushNotification[]
+  notificationLogs            notificationLog[]
+  notificationUserStatuses    notificationUserStatus[]
+  serviceUsageLogs            serviceUsageLog[]
+  courseServiceUsageSummaries courseServiceUsageSummary[]
+  adminMonthlyBills           adminMonthlyBill[]
+  IssueTrack                  IssueTrack[]
+  activeChats                 activeChat[]
+
+  @@index([id, isDeleted, email, phone])
+  @@index([email, phone])
+  @@index([email])
+  @@index([phone])
+  @@map("admins")
+}
+
+model studentOAuthProvider {
+  id        String  @id @unique @default(uuid()) @db.Uuid
+  studentId String  @db.Uuid
+  student   student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  secondaryUid String? //store secondary uid from firebase
+
+  provider    OAuthProvider // GOOGLE | APPLE
+  providerUid String // sub from Google or Apple
+  email       String? // email returned by provider
+  // accessToken  String?                
+  // refreshToken String?
+  // tokenExpiry  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerUid]) // one account per provider per uid
+  @@index([studentId])
+  @@index([provider, providerUid])
+}
+
+enum OAuthProvider {
+  GOOGLE
+  APPLE
+}
+
+model student {
+  id                String    @id @unique @default(uuid()) @db.Uuid
+  name              String
+  phone             String    @unique
+  email             String    @unique
+  role              Role      @default(student)
+  password          String
+  address           String?
+  profilePhoto      String?
+  uid               String?
+  batch             String?
+  institution       String?
+  status            String?   @default("ACTIVE")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  refreshToken      String?
+  lastResetPassword DateTime? @default(now())
+  lastLogedIn       DateTime? @default(now())
+
+  googleId      String? // Google sub — for quick lookup
+  appleId       String? // Apple sub — for quick lookup
+  isOAuthUser   Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  emailVerified Boolean   @default(false)
+  otp           String?
+  otpExpiry     DateTime?
+
+  bannedStatus String?
+
+  hoppCount            Int?    @default(1)
+  bloodGroup           String?
+  collegeAddress       String?
+  collegeName          String?
+  collegeSession       String?
+  disability           String?
+  dob                  String?
+  emergencyContact     String?
+  fatherIncome         String?
+  fatherName           String?
+  fatherNid            String?
+  fatherProfession     String?
+  fatherProfessionType String?
+  gender               String?
+  group                String?
+  guardianMobile       String?
+  hscBoard             String?
+  hscExam              String?
+  hscGpa               String?
+  hscReg               String?
+  hscRoll              String?
+  hscYear              String?
+  jscBoard             String?
+  jscExam              String?
+  jscGpa               String?
+  jscReg               String?
+  jscRoll              String?
+  jscYear              String?
+  motherIncome         String?
+  motherName           String?
+  motherNid            String?
+  motherProfession     String?
+  motherProfessionType String?
+  notes                String?
+  permanentDistrict    String?
+  permanentDivision    String?
+  permanentHouse       String?
+  permanentPostOffice  String?
+  permanentUnion       String?
+  permanentUpazila     String?
+  permanentVillage     String?
+  presentDistrict      String?
+  presentDivision      String?
+  presentHouse         String?
+  presentPostOffice    String?
+  presentUnion         String?
+  presentUpazila       String?
+  presentVillage       String?
+  previousSchool       String?
+  religion             String?
+  sscBoard             String?
+  sscExam              String?
+  sscGpa               String?
+  sscReg               String?
+  sscRoll              String?
+  sscYear              String?
+  universityChance     String? @default("No")
+  universityName       String?
+  universityPosition   String?
+  universityRollNo     String?
+  universitySession    String?
+  universitySubject    String?
+  remarks              String?
+  leads                String? @default("web") //web or app
+
+  answer           answer[]
+  classComment     classComment[]
+  classLike        classLike[]
+  classNote        classNote[]
+  course           courseStudent[]
+  cycle            cycleStudent[]
+  quora            quora[]
+  answerComment    answerComment[]
+  pushNotification pushNotification[]
+  notificationLogs notificationLog[]
+
+  sentNotifications notificationLog[] @relation("senderStudent")
+
+  notificationUserStatuses notificationUserStatus[]
+  studentAuthLogs          studentAuthLog[]
+  studentOAuthProvider     studentOAuthProvider[]
+  studentRestrictions      studentRestriction[]
+  activeChats              activeChat[]
+
+  @@index([id, email, phone])
+  @@index([email, phone])
+  @@index([email])
+  @@index([phone])
+  @@index([status])
+}
+
+enum AuthMethod {
+  EMAIL_PASSWORD
+  PHONE_OTP
+  GOOGLE
+  APPLE
+}
+
+model studentAuthLog {
+  id           String    @id @unique @default(uuid()) @db.Uuid
+  studentId    String    @db.Uuid
+  student      student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  hostName     String
+  refreshToken String?
+  hoppCount    Int?      @default(0)
+  lastLogedIn  DateTime? @default(now())
+
+  authMethod  AuthMethod @default(EMAIL_PASSWORD)
+  providerUid String? // if OAuth, store the provider's uid
+
+  //browser info
+  ip              String?
+  userAgent       String?
+  browserName     String?
+  browserVersion  String?
+  osName          String?
+  osVersion       String?
+  deviceType      String?
+  deviceModel     String?
+  deviceVendor    String?
+  cpuArchitecture String?
+  engineName      String?
+  engineVersion   String?
+  fp              String?
+
+  @@index([studentId, hostName])
+  @@index([studentId])
+  @@index([hostName])
+}
+
+enum RestrictionType {
+  FULL
+  COMMENT
+  REPLY
+  CHAT
+  LIVE_CLASS
+  MEDIA_COMMENT
+}
+
+model studentRestriction {
+  id String @id @default(uuid()) @db.Uuid
+
+  studentId String  @db.Uuid
+  student   student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  type RestrictionType
+
+  reason String?
+
+  bannedAt    DateTime  @default(now())
+  bannedUntil DateTime?
+
+  bannedByAdminId String? @db.Uuid
+
+  room_name      String?
+  banned_by      String?
+  banned_by_name String?
+  banned_by_bot  Boolean @default(false)
+
+  @@unique([studentId, type])
+  @@index([studentId])
+}
+
+model subject {
+  id            String          @id @unique @default(uuid()) @db.Uuid
+  title         String
+  subjectImage  String
+  superAdminId  String?         @db.Uuid
+  isDeleted     Boolean         @default(false)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  chapter       chapter[]
+  cycleSubject  cycleSubject[]
+  superAdmin    superAdmin?     @relation(fields: [superAdminId], references: [id])
+  courseSubject courseSubject[]
+}
+
+model chapter {
+  id                   String                 @id @unique @default(uuid()) @db.Uuid
+  chapterName          String
+  chapterImage         String?
+  subjectId            String?                @db.Uuid
+  isDeleted            Boolean                @default(false)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  chapterNo            String?
+  subject              subject?               @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  courseSubjectChapter courseSubjectChapter[]
+  cycleSubjectChapter  cycleSubjectChapter[]
+}
+
+model course {
+  id                  String   @id @unique @default(uuid()) @db.Uuid
+  superAdminId        String?  @db.Uuid
+  title               String?
+  isDeleted           Boolean? @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  cycleAvailable      Boolean? @default(false)
+  isCourseFree        Boolean? @default(false)
+  courseImage         String?
+  Category            String?
+  hasApp              Boolean? @default(true)
+  Parent              String?
+  Permalink           String?
+  ProductImage        String?
+  SubCategory         String?
+  courseId            String?  @unique
+  currency_amount     Int?     @default(0)
+  productFullName     String?
+  productId           String?
+  affiliateProductIds String[] @default([])
+  productName         String?
+  Platinum            Int?     @default(0)
+  archieveCourseId    String?  @db.Uuid
+  contentOwner        String?  @db.Uuid
+  markAsArchieve      Boolean? @default(false)
+  facebookGroup       String?
+  libraryId           String?
+  zoneSecurityKey     String?
+
+  pullzoneId  String?
+  clientId    String?
+  authKey     String?
+  cdnConfig   String?
+  bunnyApiKey String?
+
+  pullzoneId2 String?
+
+  courseAdmin                 courseAdmin[]
+  courseLookup                courseLookup[]
+  courseQuoraDailyLimit       courseQuoraDailyLimit[]
+  student                     courseStudent[]
+  superAdmin                  superAdmin?                 @relation(fields: [superAdminId], references: [id])
+  cycle                       cycle[]
+  featured                    featured[]
+  noticeORroutine             noticeORroutine[]
+  quora                       quora[]
+  courseSubject               courseSubject[]
+  notificationLogs            notificationLog[]
+  courseDefaultServices       courseDefaultService[]
+  serviceUsageLogs            serviceUsageLog[]
+  courseServiceUsageSummaries courseServiceUsageSummary[]
+
+  @@index([productName, productFullName])
+  @@map("courses")
+}
+
+model courseStudent {
+  courseId   String    @db.Uuid
+  studentId  String    @db.Uuid
+  accessCode String    @unique
+  status     Status    @default(ACTIVE)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  enrollDate DateTime?
+  course     course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student    student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([courseId, studentId])
+  @@map("courseStudents")
+}
+
+model cycleStudent {
+  cycleId    String    @db.Uuid
+  studentId  String    @db.Uuid
+  accessCode String    @unique
+  status     Status    @default(ACTIVE)
+  enrollDate DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  cycle      cycle     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  student    student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([cycleId, studentId])
+  @@map("cycleStudents")
+}
+
+model courseAdmin {
+  adminId                     String                       @db.Uuid
+  courseId                    String                       @db.Uuid
+  superAdminId                String?                      @db.Uuid
+  isDeleted                   Boolean                      @default(false)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  admin                       admin                        @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  course                      course                       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  superAdmin                  superAdmin?                  @relation(fields: [superAdminId], references: [id], onDelete: Cascade)
+  courseAdminServiceOfferings courseAdminServiceOffering[]
+
+  @@id([courseId, adminId])
+  @@map("courseAdmins")
+}
+
+model courseSubject {
+  id                   String                 @id @unique @default(uuid()) @db.Uuid
+  courseId             String                 @db.Uuid
+  title                String?
+  isDeleted            Boolean                @default(false)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  adminId              String?                @db.Uuid
+  subjectId            String                 @db.Uuid
+  courseSubjectImage   String?
+  //serial
+  serial               Int?                   @default(1)
+  courseSubjectChapter courseSubjectChapter[]
+  admin                admin?                 @relation(fields: [adminId], references: [id])
+  course               course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  subject              subject                @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@map("subjects")
+}
+
+model courseSubjectChapter {
+  id                        String         @id @unique @default(uuid()) @db.Uuid
+  isDeleted                 Boolean        @default(false)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+  chapterId                 String         @db.Uuid
+  courseSubjectId           String         @db.Uuid
+  courseSubjectChapterImage String?
+  title                     String?
+  //serial 
+  serial                    Int?           @default(1)
+  chapter                   chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  courseSubject             courseSubject  @relation(fields: [courseSubjectId], references: [id], onDelete: Cascade)
+  classContent              classContent[]
+  liveClass                 liveClass[]
+
+  @@map("chapters")
+}
+
+model classContent {
+  id                     String               @id @unique @default(uuid()) @db.Uuid
+  classTitle             String
+  classNo                String
+  videoUrl               String
+  secondaryUrl           String?
+  thumbneil              String?
+  isDeleted              Boolean              @default(false)
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  adminId                String?              @db.Uuid
+  lectureSheet           String?
+  practiceSheet          String?
+  solutionSheet          String?
+  courseSubjectChapterId String               @db.Uuid
+  hostingType            String?
+  description            String?
+  libraryId              String?
+  zoneSecurityKey        String?
+  instructor             String?
+  views                  Int                  @default(0)
+  uniqueViews            String[]
+  classComment           classComment[]
+  admin                  admin?               @relation(fields: [adminId], references: [id])
+  courseSubjectChapter   courseSubjectChapter @relation(fields: [courseSubjectChapterId], references: [id], onDelete: Cascade)
+  classLike              classLike[]
+  classNote              classNote[]
+  videoId                String?
+  markedBook             String?
+  partIndex              Int?
+
+  //serial               
+  serial      Int?         @default(1)
+  activeChats activeChat[]
+
+  @@map("classContents")
+}
+
+model cycle {
+  id                  String            @id @unique @default(uuid()) @db.Uuid
+  courseId            String            @db.Uuid
+  productId           String?
+  affiliateProductIds String[]          @default([])
+  adminId             String?           @db.Uuid
+  title               String
+  cycleFullName       String?
+  cycleImage          String
+  isDeleted           Boolean           @default(false)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  archieveCycleId     String?           @db.Uuid
+  markAsArchieve      Boolean?          @default(false)
+  isCycleFree         Boolean?          @default(false)
+  Permalink           String?
+  facebookGroup       String?
+  libraryId           String?
+  currency_amount     Int?              @default(0)
+  cycleLookup         cycleLookup[]
+  student             cycleStudent[]
+  cycleSubject        cycleSubject[]
+  admin               admin?            @relation(fields: [adminId], references: [id])
+  course              course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  featured            featured[]
+  noticeORroutine     noticeORroutine[]
+  notificationLogs    notificationLog[]
+
+  @@map("cycles")
+}
+
+model libApi {
+  id        String @id @unique @default(uuid()) @db.Uuid
+  libraryId String @unique
+  apiKey    String
+}
+
+model cycleSubject {
+  id                  String                @id @unique @default(uuid()) @db.Uuid
+  cycleId             String                @db.Uuid
+  subjectId           String                @db.Uuid
+  cycleSubjectImage   String?
+  isDeleted           Boolean               @default(false)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  adminId             String?               @db.Uuid
+  title               String?
+  //serial
+  serial              Int?                  @default(1)
+  cycleSubjectChapter cycleSubjectChapter[]
+  admin               admin?                @relation(fields: [adminId], references: [id])
+  cycle               cycle                 @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  subject             subject               @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@map("cycleSubjects")
+}
+
+model cycleSubjectChapter {
+  id                       String         @id @unique @default(uuid()) @db.Uuid
+  cycleSubjectId           String         @db.Uuid
+  chapterId                String         @db.Uuid
+  cycleSubjectChapterImage String?
+  isDeleted                Boolean        @default(false)
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+  adminId                  String?        @db.Uuid
+  title                    String?
+  //serial
+  serial                   Int?           @default(1)
+  cycleContent             cycleContent[]
+  admin                    admin?         @relation(fields: [adminId], references: [id])
+  chapter                  chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  cycleSubject             cycleSubject   @relation(fields: [cycleSubjectId], references: [id], onDelete: Cascade)
+  liveClass                liveClass[]
+
+  @@map("cycleSubjectChapters")
+}
+
+model cycleContent {
+  id                    String              @id @unique @default(uuid()) @db.Uuid
+  cycleSubjectChapterId String              @db.Uuid
+  classTitle            String
+  classNo               String
+  videoUrl              String
+  secondaryUrl          String?
+  thumbneil             String?
+  isDeleted             Boolean             @default(false)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  adminId               String?             @db.Uuid
+  lectureSheet          String?
+  practiceSheet         String?
+  solutionSheet         String?
+  hostingType           String?
+  description           String?
+  instructor            String?
+  libraryId             String?
+  zoneSecurityKey       String?
+  views                 Int                 @default(0)
+  classComment          classComment[]
+  classLike             classLike[]
+  classNote             classNote[]
+  admin                 admin?              @relation(fields: [adminId], references: [id])
+  cycleSubjectChapter   cycleSubjectChapter @relation(fields: [cycleSubjectChapterId], references: [id], onDelete: Cascade)
+  videoId               String?
+  markedBook            String?
+  partIndex             Int?
+  //serial
+  serial                Int?                @default(1)
+  activeChats           activeChat[]
+
+  @@map("cycleContents")
+}
+
+model classComment {
+  id             String         @id @unique @default(uuid()) @db.Uuid
+  classContentId String?        @db.Uuid
+  cycleContentId String?        @db.Uuid
+  studentId      String?        @db.Uuid
+  adminId        String?        @db.Uuid
+  comment        String
+  isDeleted      Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  parentId       String?        @db.Uuid
+  classContent   classContent?  @relation(fields: [classContentId], references: [id], onDelete: Cascade)
+  cycleContent   cycleContent?  @relation(fields: [cycleContentId], references: [id], onDelete: Cascade)
+  parent         classComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies        classComment[] @relation("CommentReplies")
+  admin          admin?         @relation(fields: [adminId], references: [id])
+  student        student?       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("classComments")
+}
+
+model classLike {
+  id             String        @id @unique @default(uuid()) @db.Uuid
+  classContentId String?       @db.Uuid
+  cycleContentId String?       @db.Uuid
+  createdAt      DateTime      @default(now())
+  classContent   classContent? @relation(fields: [classContentId], references: [id], onDelete: Cascade)
+  cycleContent   cycleContent? @relation(fields: [cycleContentId], references: [id], onDelete: Cascade)
+  type           ReactionType
+  studentId      String?       @db.Uuid
+  student        student?      @relation(fields: [studentId], references: [id])
+  adminId        String?       @db.Uuid
+  admin          admin?        @relation(fields: [adminId], references: [id])
+
+  @@unique([classContentId, studentId])
+  @@unique([cycleContentId, studentId])
+  @@unique([classContentId, adminId])
+  @@unique([cycleContentId, adminId])
+  @@map("classLikes")
+}
+
+model classNote {
+  id             String        @id @unique @default(uuid()) @db.Uuid
+  classContentId String?       @db.Uuid
+  cycleContentId String?       @db.Uuid
+  studentId      String        @db.Uuid
+  note           String
+  isDeleted      Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  classContent   classContent? @relation(fields: [classContentId], references: [id], onDelete: Cascade)
+  cycleContent   cycleContent? @relation(fields: [cycleContentId], references: [id], onDelete: Cascade)
+  student        student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([classContentId, studentId])
+  @@unique([cycleContentId, studentId])
+  @@map("classNotes")
+}
+
+model featured {
+  id       String  @id @unique @default(uuid()) @db.Uuid
+  courseId String? @db.Uuid
+
+  //serial
+  serial Int? @default(1)
+
+  title               String
+  description         String?
+  url                 String
+  image               String?
+  coupne              String?
+  adminId             String?   @db.Uuid
+  createdAt           DateTime  @default(now())
+  isDeleted           Boolean   @default(false)
+  updatedAt           DateTime  @updatedAt
+  endTime             DateTime?
+  startTime           DateTime?
+  type                String?
+  cycleId             String?   @db.Uuid
+  productId           String?
+  affiliateProductIds String[]  @default([])
+  admin               admin?    @relation(fields: [adminId], references: [id])
+  course              course?   @relation(fields: [courseId], references: [id])
+  cycle               cycle?    @relation(fields: [cycleId], references: [id])
+}
+
+model noticeORroutine {
+  id          String    @id @unique @default(uuid()) @db.Uuid
+  courseId    String?   @db.Uuid
+  title       String?
+  description String?
+  image       String?
+  url         String?
+  type        String?
+  startTime   DateTime?
+  endTime     DateTime?
+  adminId     String?   @db.Uuid
+  isDeleted   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  cycleId     String?   @db.Uuid
+  admin       admin?    @relation(fields: [adminId], references: [id])
+  course      course?   @relation(fields: [courseId], references: [id])
+  cycle       cycle?    @relation(fields: [cycleId], references: [id])
+}
+
+model liveClass {
+  id                     String    @id @unique @default(uuid()) @db.Uuid
+  title                  String?
+  description            String?
+  adminId                String    @db.Uuid
+  startTime              DateTime
+  endTime                DateTime?
+  url                    String?
+  secondaryUrl           String?
+  videoId                String?
+  hostingType            String?
+  yt                     String?
+  vimeo                  String? //temp store class number
+  raw                    String?
+  rec                    String?
+  stream                 String?
+  libraryId              String?
+  thumbnail              String?
+  thumbnailPath          String?
+  thumbnail256x144Path   String?
+  slidesUrl              String?
+  hotspotUrl             String?
+  lectureSheet           String?
+  practiceSheet          String?
+  solutionSheet          String?
+  noteUrl                String?
+  markedBook             String?
+  views                  Int       @default(0)
+  uniqueViews            Int       @default(0)
+  averageRating          Float     @default(0)
+  numberOfRatings        Int       @default(0)
+  notify                 Boolean   @default(false)
+  durationSec            Int?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  isDeleted              Boolean   @default(false)
+  instructor             String?
+  courseSubjectChapterId String?   @db.Uuid
+  status                 String?   @default("scheduled")
+  bunnyVideoId           String?
+  tsid                   String?
+  webrtc                 String?
+  hls                    String?
+  rtmp                   String?
+  code                   String?
+  hostId                 String?
+  hlsDirect              String?
+  extraInfo              Json?
+  partsCount             Int       @default(0)
+  roomClosedAt           DateTime?
+  lastRecordingAt        DateTime?
+
+  cdnUrl      String?
+  bunnyApiKey String?
+
+  mediaServer  String?
+  isFreeClass  Boolean? @default(false)
+  freeClassUrl String?
+
+  //new field
+  customHlsUrl   String?
+  publicEmbed    Boolean? @default(false)
+  ingestType     String?  @default("webrtc")
+  rtmp_url       String?
+  rtmp_streamKey String?
+  isPredefined   Boolean? @default(false)
+  teacherButton  Boolean? @default(true)
+  participants   Json?
+  messages       Json?
+
+  cycleSubjectChapterId String?               @db.Uuid
+  admin                 admin                 @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  courseSubjectChapter  courseSubjectChapter? @relation(fields: [courseSubjectChapterId], references: [id], onDelete: Cascade)
+  cycleSubjectChapter   cycleSubjectChapter?  @relation(fields: [cycleSubjectChapterId], references: [id], onDelete: Cascade)
+
+  @@map("liveClasses")
+}
+
+model RecordingIngest {
+  id           String   @id @default(uuid()) @db.Uuid
+  videoId      String
+  sessionId    String
+  partName     String?
+  mp4Url       String
+  status       String   @default("processing") // processing|done|failed
+  bunnyVideoId String?
+  createdAt    DateTime @default(now())
+
+  @@unique([videoId, sessionId, mp4Url, partName])
+}
+
+model courseLookup {
+  id        String   @id @unique @default(uuid()) @db.Uuid
+  entityId  String   @unique
+  courseId  String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  course    course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+model cycleLookup {
+  id        String   @id @unique @default(uuid()) @db.Uuid
+  entityId  String   @unique
+  cycleId   String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  cycle     cycle    @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+}
+
+model quora {
+  id           String   @id @unique @default(uuid()) @db.Uuid
+  content      String
+  OCRcontent   String?
+  status       String   @default("PENDING") // PENDING, DUPLICATE, UNSOLVED, SOLVED, REJECTED
+  studentId    String?  @db.Uuid
+  student      student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  courseId     String?  @db.Uuid
+  course       course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  subject      String?
+  topic        String?
+  embeddingRef String? // referenec to embedding vector in pgvector Db
+  ocrProcessed Boolean  @default(false)
+  isDeleted    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  asgshop Int @default(0)
+  solver  Int @default(0)
+
+  isDuplicate    Boolean? @default(false)
+  duplicateCount Int?     @default(0)
+
+  quoraImage        quoraImage[]
+  questionEmbedding questionEmbedding[]
+  answer            answer[]
+
+  @@index([studentId, status])
+  @@index([courseId, status])
+  @@map("quoras")
+}
+
+model quoraImage {
+  id        String   @id @unique @default(uuid()) @db.Uuid
+  quoraId   String   @db.Uuid
+  imageUrl  String
+  order     Int      @default(0)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  quora     quora    @relation(fields: [quoraId], references: [id], onDelete: Cascade)
+
+  @@map("quoraImages")
+}
+
+model creditModel {
+  id             String   @id @unique @default(uuid()) @db.Uuid
+  perQuoraCredit Int      @default(1)
+  asgshop        Int      @default(0)
+  solver         Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model solver {
+  id               String   @id @unique @default(uuid()) @db.Uuid
+  email            String   @unique
+  phone            String   @unique
+  name             String
+  photo            String?
+  role             Role?    @default(solver)
+  status           Status   @default(ACTIVE)
+  approved         Boolean  @default(false)
+  address          String
+  HSC              String
+  University       String
+  UniAbbreviation  String?
+  UniversityId     String
+  lifeTimeCredit   Int      @default(0)
+  availableCredit  Int      @default(0)
+  totalSolved      Int      @default(0)
+  rank             String?  @default("unranked")
+  password         String?
+  refreshToken     String?
+  isDeleted        Boolean  @default(false)
+  isPasswordChange Boolean  @default(false)
+  superAdminId     String?  @db.Uuid
+  adminId          String?  @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  //browser info
+  ip               String?
+  userAgent        String?
+  browserName      String?
+  browserVersion   String?
+  osName           String?
+  osVersion        String?
+  deviceType       String?
+  deviceModel      String?
+  deviceVendor     String?
+  cpuArchitecture  String?
+  engineName       String?
+  engineVersion    String?
+  fp               String?
+
+  answer        answer[]
+  answerComment answerComment[]
+  superAdmin    superAdmin?     @relation(fields: [superAdminId], references: [id])
+
+  @@index([email, phone])
+  @@index([email])
+  @@index([phone])
+  @@map("solvers")
+}
+
+model courseQuoraDailyLimit {
+  id         String   @id @unique @default(uuid()) @db.Uuid
+  courseId   String   @db.Uuid
+  lastLimit  Int?     @default(0)
+  dailyLimit Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  course     course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, dailyLimit])
+  @@index([courseId])
+  @@map("courseQuoraDailyLimits")
+}
+
+model questionEmbedding {
+  id        String                      @id @unique @default(uuid()) @db.Uuid
+  quoraId   String                      @db.Uuid
+  embedding Unsupported("vector(768)")?
+  modelName String?
+  createdAt DateTime                    @default(now())
+  updatedAt DateTime                    @updatedAt
+  quora     quora                       @relation(fields: [quoraId], references: [id], onDelete: Cascade)
+
+  @@map("questionEmbeddings")
+}
+
+model answer {
+  id            String   @id @unique @default(uuid()) @db.Uuid
+  quoraId       String   @db.Uuid
+  solverId      String?  @db.Uuid
+  studentId     String?  @db.Uuid
+  student       student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  content       String? //can be used for both human solver answer raw text OR ai markdown solve
+  isAi          Boolean  @default(false)
+  similarQuoras String[] @default([])
+  answerJson    Json? //ai answer for json store
+  usage         Json?
+  answerFile    String? // if the answer is one image then image link else answer file in pdf format
+  audioFile     String? //is solver wants to add audio
+  isAccepted    Boolean  @default(false)
+  upvotes       Int      @default(0)
+  downvotes     Int      @default(0)
+  isDeleted     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  quora         quora    @relation(fields: [quoraId], references: [id], onDelete: Cascade)
+  solver        solver?  @relation(fields: [solverId], references: [id], onDelete: Cascade)
+
+  vote          vote[]
+  answerComment answerComment[]
+
+  @@index([quoraId, solverId])
+  @@index([quoraId, studentId])
+  @@index([quoraId, isAi])
+  @@map("answers")
+}
+
+model answerComment {
+  id          String   @id @default(uuid()) @db.Uuid
+  answerId    String?  @db.Uuid
+  answer      answer?  @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  studentId   String?  @db.Uuid
+  student     student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  solverId    String?  @db.Uuid
+  solver      solver?  @relation(fields: [solverId], references: [id], onDelete: Cascade)
+  comments    String?
+  commentFile String?
+  audioFile   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("answerComments")
+}
+
+model vote {
+  id       String  @id @default(uuid()) @db.Uuid
+  answerId String  @db.Uuid
+  answer   answer  @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  voterId  String  @db.Uuid
+  isUpvote Boolean @default(true)
+
+  @@unique([answerId, voterId])
+}
+
+model extraData {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String?
+  data      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("extraDatas")
+}
+
+model pushNotification {
+  id String @id @default(uuid()) @db.Uuid
+
+  studentId String? @db.Uuid
+  adminId   String? @db.Uuid
+
+  userType String // STUDENT | ADMIN
+  platform String // WEB | ANDROID | IOS
+  token    String @unique
+
+  isViewed   Boolean  @default(false)
+  isValid    Boolean  @default(true)
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  student student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  admin   admin?   @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, isValid])
+  @@index([adminId, isValid])
+  @@index([platform, isValid])
+  @@index([userType, isValid])
+  @@map("pushNotifications")
+}
+
+model notificationLog {
+  id String @id @default(uuid()) @db.Uuid
+
+  // type of notification receiver (SINGLE/ALL_USERS/COURSE_BASED)
+  type String?
+
+  // sender
+  senderType         String?
+  senderAdminId      String? @db.Uuid
+  senderSuperAdminId String? @db.Uuid
+  senderStudentId    String? @db.Uuid
+
+  // receiver (only single student when send sms)
+  receiverSingleStudentId String? @db.Uuid
+
+  // reference (course/cycle/etc)
+  referenceType String?
+  referenceId   String?
+  courseId      String? @db.Uuid
+  cycleId       String? @db.Uuid
+
+  // message
+  title    String
+  body     String
+  deepLink String?
+  image    String?
+
+  //count
+  uniqueId     String?
+  sendCount    Int      @default(0)
+  failedCount  Int      @default(0)
+  invalidCount Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  // relations
+  senderStudent            student?                 @relation("senderStudent", fields: [senderStudentId], references: [id])
+  student                  student?                 @relation(fields: [receiverSingleStudentId], references: [id], onDelete: Cascade)
+  superAdmin               superAdmin?              @relation(fields: [senderSuperAdminId], references: [id])
+  admin                    admin?                   @relation(fields: [senderAdminId], references: [id])
+  course                   course?                  @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  cycle                    cycle?                   @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  notificationUserStatuses notificationUserStatus[]
+
+  @@index([receiverSingleStudentId])
+  @@index([senderAdminId])
+  @@index([senderSuperAdminId])
+  @@index([courseId])
+  @@index([cycleId])
+  @@map("notificationLogs")
+}
+
+model notificationUserStatus {
+  id             String  @id @default(uuid()) @db.Uuid
+  notificationId String  @db.Uuid
+  studentId      String? @db.Uuid
+  adminId        String? @db.Uuid
+
+  isDelivered Boolean   @default(false)
+  deliveredAt DateTime?
+
+  isViewed Boolean   @default(false)
+  viewedAt DateTime?
+
+  isClicked Boolean   @default(false)
+  clickedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  // relations
+  notification notificationLog @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  student      student?        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  admin        admin?          @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, studentId])
+  @@unique([notificationId, adminId])
+  @@index([studentId])
+  @@index([notificationId])
+}
+
+enum Status {
+  ACTIVE
+  DISABLED
+}
+
+enum Role {
+  superAdmin
+  admin
+  student
+  solver
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  CARE
+  HAHA
+  WOW
+  SAD
+  ANGRY
+}
+
+//below schema is add one services
+enum OfferingStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  EXPIRED
+}
+
+enum PriceType {
+  FIXED
+  ONE_TIME
+  MONTHLY
+  YEARLY
+  PER_STUDENT
+  PER_CLASS
+  PER_COURSE
+  PER_MB
+  PER_GB
+  PER_TB
+  BANDWIDTH
+  PER_HOUR
+  PER_MINUTE
+  PER_API_CALL
+  PER_USER
+  CUSTOM
+}
+
+model addOnService {
+  id          String  @id @default(uuid()) @db.Uuid
+  code        String  @unique
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+
+  defaults                    courseDefaultService[]
+  offerings                   courseAdminServiceOffering[]
+  serviceUsageLogs            serviceUsageLog[]
+  courseServiceUsageSummaries courseServiceUsageSummary[]
+
+  @@map("add_on_services")
+}
+
+model courseDefaultService {
+  id        String  @id @default(uuid()) @db.Uuid
+  courseId  String  @db.Uuid
+  serviceId String  @db.Uuid
+  isActive  Boolean @default(true)
+
+  course  course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  service addOnService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  prices    courseDefaultServicePrice[]
+  isDeleted Boolean                     @default(false)
+  createdAt DateTime                    @default(now())
+  updatedAt DateTime                    @updatedAt
+
+  @@unique([courseId, serviceId])
+  @@index([courseId, isActive])
+  @@map("course_default_services")
+}
+
+model courseDefaultServicePrice {
+  id                     String @id @default(uuid()) @db.Uuid
+  courseDefaultServiceId String @db.Uuid
+
+  type     PriceType
+  // amount   Int
+  amount   Decimal   @db.Decimal(65, 10)
+  currency String    @default("BDT")
+
+  minQty Int?
+  maxQty Int?
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+  note      String?
+
+  isDeleted Boolean @default(false)
+
+  courseDefaultService courseDefaultService @relation(fields: [courseDefaultServiceId], references: [id], onDelete: Cascade)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  serviceUsageLogs     serviceUsageLog[]
+
+  @@unique([courseDefaultServiceId, type, minQty, maxQty])
+  @@index([courseDefaultServiceId, type, isActive])
+  @@map("course_default_service_prices")
+}
+
+model courseAdminServiceOffering {
+  id        String         @id @default(uuid()) @db.Uuid
+  courseId  String         @db.Uuid
+  adminId   String         @db.Uuid
+  serviceId String         @db.Uuid
+  status    OfferingStatus @default(OFFERED)
+
+  offeredAt DateTime  @default(now())
+  decidedAt DateTime?
+  expiresAt DateTime?
+  note      String?
+
+  courseAdmin courseAdmin  @relation(fields: [courseId, adminId], references: [courseId, adminId], onDelete: Cascade)
+  service     addOnService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  prices                      courseAdminServiceOfferingPrice[]
+  selection                   courseAdminServiceOfferingSelection?
+  isDeleted                   Boolean                              @default(false)
+  createdAt                   DateTime                             @default(now())
+  updatedAt                   DateTime                             @updatedAt
+  serviceUsageLogs            serviceUsageLog[]
+  courseServiceUsageSummaries courseServiceUsageSummary[]
+
+  @@unique([courseId, adminId, serviceId])
+  @@map("course_admin_service_offerings")
+}
+
+model courseAdminServiceOfferingPrice {
+  id         String @id @default(uuid()) @db.Uuid
+  offeringId String @db.Uuid
+
+  type     PriceType
+  // amount   Int
+  amount   Decimal   @db.Decimal(65, 10)
+  currency String    @default("BDT")
+
+  minQty Int?
+  maxQty Int?
+
+  isDefault Boolean @default(false)
+  note      String?
+
+  offering                             courseAdminServiceOffering            @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  courseAdminServiceOfferingSelections courseAdminServiceOfferingSelection[]
+  isDeleted                            Boolean                               @default(false)
+  createdAt                            DateTime                              @default(now())
+  updatedAt                            DateTime                              @updatedAt
+  serviceUsageLogs                     serviceUsageLog[]
+
+  @@unique([offeringId, type, minQty, maxQty])
+  @@map("course_admin_service_offering_prices")
+}
+
+model courseAdminServiceOfferingSelection {
+  id              String @id @default(uuid()) @db.Uuid
+  offeringId      String @unique @db.Uuid
+  selectedPriceId String @db.Uuid
+
+  offering      courseAdminServiceOffering      @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  selectedPrice courseAdminServiceOfferingPrice @relation(fields: [selectedPriceId], references: [id], onDelete: Restrict)
+
+  selectedAt DateTime @default(now())
+  isDeleted  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("course_admin_service_offering_selections")
+}
+
+model activityLogs {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String?
+  description String?
+  type        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+//billing system addon services
+enum UsageStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum BillingStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  INVOICED
+  PAID
+  OVERDUE
+  DISPUTED
+}
+
+enum CalculationMethod {
+  MANUAL
+  AUTOMATIC
+  SYSTEM_GENERATED
+}
+
+model serviceUsageLog {
+  id String @id @default(uuid()) @db.Uuid
+
+  // Core Relations
+  courseId   String  @db.Uuid
+  adminId    String  @db.Uuid
+  serviceId  String  @db.Uuid
+  offeringId String? @db.Uuid
+
+  offeringPriceId       String? @db.Uuid
+  defaultServicePriceId String? @db.Uuid
+
+  // Usage Details
+  priceType   PriceType
+  quantity    Float
+  unit        String
+  ratePerUnit Decimal   @db.Decimal(65, 10)
+  totalAmount Decimal   @db.Decimal(65, 10)
+  currency    String    @default("BDT")
+
+  // Time Period
+  usageDate    DateTime
+  billingMonth Int
+  billingYear  Int
+  startTime    DateTime?
+  endTime      DateTime?
+
+  // Context
+  referenceId   String?
+  referenceType String?
+  metadata      Json?
+
+  // Status & Tracking
+  status     UsageStatus @default(ACTIVE)
+  isBillable Boolean     @default(true)
+  isInvoiced Boolean     @default(false)
+  invoiceId  String?     @db.Uuid
+
+  // Approvals
+  verifiedBy   String?   @db.Uuid
+  verifiedAt   DateTime?
+  verifiedNote String?
+
+  // Relations
+  course        course                           @relation(fields: [courseId], references: [id])
+  admin         admin                            @relation(fields: [adminId], references: [id])
+  service       addOnService                     @relation(fields: [serviceId], references: [id])
+  offering      courseAdminServiceOffering?      @relation(fields: [offeringId], references: [id])
+  offeringPrice courseAdminServiceOfferingPrice? @relation(fields: [offeringPriceId], references: [id])
+  defaultPrice  courseDefaultServicePrice?       @relation(fields: [defaultServicePriceId], references: [id])
+
+  // Timestamps
+  createdAt                   DateTime                   @default(now())
+  updatedAt                   DateTime                   @updatedAt
+  isDeleted                   Boolean                    @default(false)
+  courseServiceUsageSummary   courseServiceUsageSummary? @relation(fields: [courseServiceUsageSummaryId], references: [id])
+  courseServiceUsageSummaryId String?                    @db.Uuid
+
+  @@unique([courseId, adminId, serviceId, usageDate, referenceId])
+  @@index([adminId, billingYear, billingMonth])
+  @@index([courseId, billingYear, billingMonth])
+  @@index([serviceId])
+  @@index([status])
+  @@index([isInvoiced])
+  @@map("service_usage_logs")
+}
+
+model courseServiceUsageSummary {
+  id String @id @default(uuid()) @db.Uuid
+
+  // Identifiers
+  courseId   String  @db.Uuid
+  adminId    String  @db.Uuid
+  serviceId  String  @db.Uuid
+  offeringId String? @db.Uuid
+
+  // Summary Period
+  billingYear  Int
+  billingMonth Int
+
+  // Usage Summary
+  totalQuantity Float
+  totalAmount   Decimal @db.Decimal(65, 10)
+  currency      String  @default("BDT")
+
+  // Breakdown by type
+  hourlyUsage  Float?
+  storageUsage Float?
+  studentCount Int?
+  classCount   Int?
+  apiCalls     Int?
+
+  // Status
+  status            BillingStatus     @default(DRAFT)
+  calculationMethod CalculationMethod @default(SYSTEM_GENERATED)
+
+  // Invoice
+  invoiceNumber String?
+  invoiceDate   DateTime?
+  dueDate       DateTime?
+  paidAt        DateTime?
+
+  // Relations
+  course   course                      @relation(fields: [courseId], references: [id])
+  admin    admin                       @relation(fields: [adminId], references: [id])
+  service  addOnService                @relation(fields: [serviceId], references: [id])
+  offering courseAdminServiceOffering? @relation(fields: [offeringId], references: [id])
+
+  // Logs Relation
+  usageLogs serviceUsageLog[]
+
+  // Timestamps
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  adminMonthlyBill   adminMonthlyBill? @relation(fields: [adminMonthlyBillId], references: [id])
+  adminMonthlyBillId String?           @db.Uuid
+
+  @@unique([courseId, adminId, serviceId, billingYear, billingMonth], map: "course_service_usage_summaries_without_offering_unique")
+  @@unique([courseId, adminId, serviceId, billingYear, billingMonth, offeringId], map: "course_service_usage_summaries_with_offering_unique")
+  @@index([adminId, status])
+  @@index([billingYear, billingMonth])
+  @@map("course_service_usage_summaries")
+}
+
+model adminMonthlyBill {
+  id String @id @default(uuid()) @db.Uuid
+
+  adminId      String @db.Uuid
+  billingYear  Int
+  billingMonth Int
+
+  // Financial Summary
+  subtotal    Decimal @db.Decimal(65, 10)
+  discount    Decimal @default(0) @db.Decimal(65, 10)
+  tax         Decimal @default(0) @db.Decimal(65, 10)
+  totalAmount Decimal @db.Decimal(65, 10)
+  paidAmount  Decimal @default(0) @db.Decimal(65, 10)
+  dueAmount   Decimal @db.Decimal(65, 10)
+  currency    String  @default("BDT")
+
+  // Breakdown by Course
+  courseBreakdown Json
+
+  // Invoice Details
+  invoiceNumber String    @unique
+  invoiceDate   DateTime
+  dueDate       DateTime
+  paymentDate   DateTime?
+  paymentMethod String?
+  transactionId String?
+
+  // Status
+  status BillingStatus @default(DRAFT)
+
+  // Relations
+  admin     admin                       @relation(fields: [adminId], references: [id])
+  summaries courseServiceUsageSummary[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+
+  @@unique([adminId, billingYear, billingMonth])
+  @@index([status])
+  @@index([dueDate])
+  @@map("admin_monthly_bills")
+}
+
+model issueTag {
+  id           String      @id @default(uuid()) @db.Uuid
+  tag          String      @unique
+  superAdminId String?     @db.Uuid
+  superAdmin   superAdmin? @relation(fields: [superAdminId], references: [id], onDelete: Cascade)
+
+  IssueTrack IssueTrack[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model IssuePriority {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String       @unique
+  level      Int          @unique
+  issueTrack IssueTrack[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([level])
+}
+
+model IssueTrack {
+  id         String        @id @default(uuid()) @db.Uuid
+  priorityId String        @db.Uuid
+  priority   IssuePriority @relation(fields: [priorityId], references: [id], onDelete: Restrict)
+
+  issueTagId String   @db.Uuid
+  issueTag   issueTag @relation(fields: [issueTagId], references: [id], onDelete: Cascade)
+
+  adminId          String?     @db.Uuid
+  admin            admin?      @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  ip               String?
+  issueTitle       String?
+  issueDescription String?
+  images           String[]
+  status           String      @default("PENDING") //PENDING, ONGOING, REJECTED, SOLVED
+  isEdited         Boolean     @default(false)
+  solverId         String?     @db.Uuid
+  solver           superAdmin? @relation(fields: [solverId], references: [id], onDelete: Cascade)
+  remarks          String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  solvedAt  DateTime?
+
+  @@index([priorityId])
+  @@index([adminId])
+  @@index([solverId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([solvedAt])
+  @@index([adminId, status])
+  @@index([solverId, status])
+}
+
+model notifiedTransactions {
+  id            String   @id @default(uuid()) @db.Uuid
+  source        String //asg || afs || acs camp
+  transactionId String
+  uid           String?
+  name          String?
+  email         String?
+  phone         String?
+  HSC           String?
+  institution   String?
+  productId     String?
+  productName   String?
+  gateway       String?
+  amount        String?
+  createdAt     DateTime @default(now())
+}
+
+model dailyAyah {
+  date         DateTime @id @db.Date
+  surah        Int
+  ayah         Int
+  ayahKey      String
+  occasionTags String[]
+  payload      Json
+  createdAt    DateTime @default(now())
+
+  @@index([ayahKey])
+  @@map("daily_ayah")
+}
+
+//active chat message store
+model activeChat {
+  id               String   @id @default(uuid()) @db.Uuid
+  classContentId   String?  @db.Uuid
+  cycleContentId   String?  @db.Uuid
+  studentId        String?  @db.Uuid
+  adminId          String?  @db.Uuid
+  superAdminId     String?  @db.Uuid
+  message          String
+  messageCreatedAt BigInt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  classContent classContent? @relation(fields: [classContentId], references: [id], onDelete: Cascade)
+  cycleContent cycleContent? @relation(fields: [cycleContentId], references: [id], onDelete: Cascade)
+  student      student?      @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  admin        admin?        @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  superAdmin   superAdmin?   @relation(fields: [superAdminId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([classContentId, messageCreatedAt])
+  @@index([cycleContentId, messageCreatedAt])
+  @@map("activeChats")
+}
+
+enum MediaApp {
+  FRB
+  ACADEMIC
+  ADMISSION
+}
+
+enum CredentialStatus {
+  ACTIVE
+  EXPIRED
+}
+
+model MediaCredential {
+  id String @id @default(cuid())
+
+  app   MediaApp
+  keyId String   @unique
+
+  hash String
+
+  version Int @default(1)
+
+  status CredentialStatus @default(ACTIVE)
+
+  validFrom  DateTime
+  validUntil DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([app, status])
+  @@index([app, status])
+}
+
+model event {
+  id        String    @id @default(uuid()) @db.Uuid
+  startDate DateTime?
+  endDate   DateTime?
+  metaData  Json?
+}
+
+//grand Celebration table
+model grandCelebrationAuth {
+  id            String    @id @default(uuid()) @db.Uuid
+  phone         String    @unique
+  photo         String?
+  role          String    @default("student")
+  isVerifyPhone Boolean   @default(false)
+  otp           String?
+  count         Int       @default(0)
+  expiresAt     DateTime?
+  otpSendAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("grandCelebrationAuths")
+}

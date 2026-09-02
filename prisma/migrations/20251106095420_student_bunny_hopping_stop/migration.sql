@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "student" ADD COLUMN     "lastLogedIn" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP;
