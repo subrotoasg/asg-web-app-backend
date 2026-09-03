@@ -1,0 +1,1463 @@
+<title>প্রোডাকশনে Redis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anek+Bangla:wght@500;600;700;800&family=Hind+Siliguri:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* ============================================================
+   REDIS IN PRODUCTION — animated broadcast deck
+   Committed single-theme dark design (built to be screen-recorded).
+   Every colour is painted explicitly so the page never borrows
+   the host ground.
+   ============================================================ */
+:root{
+  --ground:#0C0F17;
+  --ground-2:#11151F;
+  --panel:#161B28;
+  --panel-2:#1C2231;
+  --line:#28303F;
+  --line-soft:#1F2634;
+  --ink:#E9EDF6;
+  --ink-2:#B4BCCE;
+  --muted:#7E8798;
+  --signal:#F5A63C;      /* an in-flight request */
+  --signal-dim:#8A5F22;
+  --infra:#3FC9C0;       /* redis — the hot layer */
+  --infra-dim:#1E6A66;
+  --fail:#E2607A;        /* a miss, a drop, a failure */
+  --ok:#7BD88F;
+  --violet:#9A8CF0;      /* postgres — the expensive layer */
+}
+
+*{box-sizing:border-box}
+
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"Hind Siliguri","Noto Sans Bengali",system-ui,sans-serif;
+  margin:0;
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
+
+/* ---------- the 16:9 stage ---------- */
+.deck{
+  position:relative;
+  width:min(100vw, calc(100vh * 16 / 9));
+  height:min(100vh, calc(100vw * 9 / 16));
+  background:
+    radial-gradient(120% 90% at 78% 8%, rgba(63,201,192,.10), transparent 55%),
+    radial-gradient(95% 80% at 10% 96%, rgba(245,166,60,.10), transparent 58%),
+    var(--ground);
+  overflow:hidden;
+  --u:1vw;
+}
+@supports (container-type:size){
+  .deck{container-type:size; --u:1cqw}
+}
+.deck::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size:calc(var(--u) * 4) calc(var(--u) * 4);
+  opacity:.34;
+  pointer-events:none;
+}
+
+/* type scale — one unit, one scale */
+.deck{
+  --t-hero:calc(var(--u) * 4.5);
+  --t-title:calc(var(--u) * 2.78);
+  --t-lead:calc(var(--u) * 1.68);
+  --t-body:calc(var(--u) * 1.40);
+  --t-small:calc(var(--u) * 1.16);
+  --t-label:calc(var(--u) * .95);
+  --t-mono:calc(var(--u) * 1.04);
+  --t-data:calc(var(--u) * 3.1);
+  --pad:calc(var(--u) * 5.2);
+}
+
+h1,h2,h3{font-family:"Anek Bangla","Hind Siliguri",system-ui,sans-serif;margin:0;text-wrap:balance;font-weight:700;line-height:1.14}
+p{margin:0}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-ligatures:none}
+
+/* ---------- slides ---------- */
+.slide{
+  position:absolute;
+  inset:0;
+  padding:calc(var(--u) * 4.0) var(--pad) calc(var(--u) * 4.6) calc(var(--u) * 9.2);
+  display:none;
+  flex-direction:column;
+  gap:calc(var(--u) * 1.35);
+  overflow:hidden;
+}
+.slide.is-active{display:flex}
+
+.eyebrow{
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  letter-spacing:.19em;
+  text-transform:uppercase;
+  color:var(--infra);
+  display:flex;
+  align-items:center;
+  gap:calc(var(--u) * .9);
+}
+.eyebrow::before{
+  content:"";
+  width:calc(var(--u) * 2.4);
+  height:2px;
+  background:var(--infra);
+  display:block;
+}
+.slide h2{font-size:var(--t-title);letter-spacing:-.01em}
+.lead{font-size:var(--t-lead);color:var(--ink-2);max-width:60ch;line-height:1.5;font-weight:300}
+
+/* staged reveal — only inside the active slide, so the first frame
+   of every slide is already composed when it comes up */
+.slide.is-active .rv{animation:rise .52s cubic-bezier(.2,.7,.3,1) backwards}
+.slide.is-active .rv:nth-child(1){animation-delay:.02s}
+.slide.is-active .rv:nth-child(2){animation-delay:.10s}
+.slide.is-active .rv:nth-child(3){animation-delay:.18s}
+.slide.is-active .rv:nth-child(4){animation-delay:.26s}
+.slide.is-active .rv:nth-child(5){animation-delay:.34s}
+.slide.is-active .rv:nth-child(6){animation-delay:.42s}
+@keyframes rise{from{opacity:0;transform:translateY(calc(var(--u) * 1.1))}to{opacity:1;transform:none}}
+
+/* ---------- chrome: rail, counter, progress ---------- */
+.rail{
+  position:absolute;
+  left:calc(var(--u) * 3.4);
+  top:50%;
+  transform:translateY(-50%);
+  display:flex;
+  flex-direction:column;
+  gap:calc(var(--u) * .62);
+  z-index:5;
+}
+.tick{
+  width:calc(var(--u) * .28);
+  height:calc(var(--u) * 1.05);
+  border-radius:99px;
+  background:var(--line);
+  transition:background .3s, height .3s;
+}
+.tick.on{background:var(--signal);height:calc(var(--u) * 2.1)}
+.tick.done{background:var(--infra-dim)}
+
+.slide-no{
+  position:absolute;
+  left:calc(var(--u) * 2.5);
+  top:calc(var(--u) * 3.6);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  color:var(--muted);
+  letter-spacing:.1em;
+  z-index:5;
+}
+.brandmark{
+  position:absolute;
+  right:var(--pad);
+  top:calc(var(--u) * 3.6);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  letter-spacing:.16em;
+  color:var(--muted);
+  text-transform:uppercase;
+  z-index:5;
+}
+.bar{
+  position:absolute;
+  left:0;bottom:0;right:0;
+  height:calc(var(--u) * .34);
+  background:var(--line-soft);
+  z-index:6;
+}
+.bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--infra),var(--signal));width:0;transition:width .45s cubic-bezier(.2,.7,.3,1)}
+
+.hint{
+  position:absolute;
+  right:var(--pad);
+  bottom:calc(var(--u) * 1.6);
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .82);
+  color:var(--muted);
+  letter-spacing:.08em;
+  z-index:6;
+  display:flex;
+  gap:calc(var(--u) * 1.2);
+}
+.hint b{color:var(--ink-2);font-weight:500}
+.hint.is-hidden{opacity:0}
+
+/* ---------- teleprompter ---------- */
+.prompt{
+  position:absolute;
+  left:0;right:0;bottom:0;
+  background:linear-gradient(to top, rgba(9,11,17,.99), rgba(9,11,17,.96));
+  border-top:1px solid var(--line);
+  padding:calc(var(--u) * 2.2) var(--pad) calc(var(--u) * 2.4) calc(var(--u) * 9.2);
+  transform:translateY(101%);
+  transition:transform .38s cubic-bezier(.2,.7,.3,1);
+  z-index:7;
+  max-height:62%;
+  overflow-y:auto;
+}
+.prompt.open{transform:none}
+.prompt .ph{
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-label);
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:var(--signal);
+  margin-bottom:calc(var(--u) * 1.1);
+}
+.prompt .pt{font-size:calc(var(--u) * 1.6);line-height:1.62;color:var(--ink);max-width:72ch;font-weight:300}
+.prompt .pt em{color:var(--signal);font-style:normal;font-weight:500}
+
+/* ============================================================
+   SHARED PARTS
+   ============================================================ */
+
+/* node = one box in the pipeline */
+.node{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .55);
+  padding:calc(var(--u) * 1.05) calc(var(--u) * 1.15);
+  display:flex;
+  flex-direction:column;
+  gap:calc(var(--u) * .3);
+  min-width:0;
+}
+.node .nk{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .8);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+.node .nn{font-size:var(--t-small);font-weight:600;color:var(--ink);line-height:1.25}
+.node .nd{font-size:calc(var(--u) * .98);color:var(--ink-2);font-weight:300;line-height:1.35}
+.node.sig{border-color:var(--signal-dim);box-shadow:inset 0 0 0 1px rgba(245,166,60,.14)}
+.node.sig .nk{color:var(--signal)}
+.node.inf{border-color:var(--infra-dim)}
+.node.inf .nk{color:var(--infra)}
+.node.vio{border-color:#4A3F86}
+.node.vio .nk{color:var(--violet)}
+.node.bad{border-color:#7A3448}
+.node.bad .nk{color:var(--fail)}
+
+/* wire = animated connector. packets ride it left→right. */
+.wire{
+  position:relative;
+  flex:1 1 auto;
+  min-width:calc(var(--u) * 1.25);
+  height:2px;
+  background:var(--line);
+  align-self:center;
+}
+.wire::after{
+  content:"";
+  position:absolute;
+  right:calc(var(--u) * -.12);
+  top:50%;
+  width:calc(var(--u) * .5);
+  height:calc(var(--u) * .5);
+  border-right:2px solid var(--line);
+  border-top:2px solid var(--line);
+  transform:translateY(-50%) rotate(45deg);
+}
+.pkt{
+  position:absolute;
+  top:50%;
+  width:calc(var(--u) * .58);
+  height:calc(var(--u) * .58);
+  margin-top:calc(var(--u) * -.29);
+  border-radius:50%;
+  background:var(--signal);
+  box-shadow:0 0 calc(var(--u) * 1.1) rgba(245,166,60,.75);
+  opacity:0;
+}
+.slide.is-active .pkt{animation:flow 1.9s linear infinite}
+.pkt.t{background:var(--infra);box-shadow:0 0 calc(var(--u) * 1.1) rgba(63,201,192,.7)}
+.pkt.d1{animation-delay:.30s}
+.pkt.d2{animation-delay:.62s}
+.pkt.d3{animation-delay:.95s}
+.pkt.d4{animation-delay:1.28s}
+.pkt.d5{animation-delay:1.60s}
+@keyframes flow{
+  0%{left:0;opacity:0}
+  12%{opacity:1}
+  88%{opacity:1}
+  100%{left:100%;opacity:0}
+}
+
+/* stat chips */
+.chips{display:flex;gap:calc(var(--u) * .9);flex-wrap:wrap}
+.chip{
+  border:1px solid var(--line);
+  border-radius:99px;
+  padding:calc(var(--u) * .42) calc(var(--u) * 1.25);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-mono);
+  color:var(--ink-2);
+  background:rgba(22,27,40,.7);
+  white-space:nowrap;
+}
+.chip b{color:var(--signal);font-weight:700}
+.chip.i b{color:var(--infra)}
+.chip.g b{color:var(--ok)}
+.chip.r b{color:var(--fail)}
+
+/* code block */
+.code{
+  background:#0A0D14;
+  border:1px solid var(--line);
+  border-left:3px solid var(--signal);
+  border-radius:calc(var(--u) * .4);
+  padding:calc(var(--u) * 1.1) calc(var(--u) * 1.35);
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-mono);
+  line-height:1.58;
+  color:#C6CEDE;
+  overflow-x:auto;
+  white-space:pre;
+}
+.code.inf{border-left-color:var(--infra)}
+.code.bad{border-left-color:var(--fail)}
+.code .k{color:#9A8CF0}
+.code .s{color:var(--ok)}
+.code .n{color:var(--signal)}
+.code .c{color:#5C657A}
+.code .f{color:var(--infra)}
+
+/* two column body */
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u) * 2.4);align-items:start;flex:1;min-height:0}
+.cols.wide-l{grid-template-columns:1.25fr 1fr}
+.cols.wide-r{grid-template-columns:1fr 1.3fr}
+.stack{display:flex;flex-direction:column;gap:calc(var(--u) * .95);min-width:0;min-height:0}
+
+/* bullet list where the marker carries meaning (a numbered step) */
+.steps{display:flex;flex-direction:column;gap:calc(var(--u) * 1.0);list-style:none;padding:0;margin:0}
+.steps li{display:flex;gap:calc(var(--u) * 1.05);align-items:flex-start;font-size:var(--t-body);color:var(--ink-2);font-weight:300;line-height:1.45}
+.steps li > .m{
+  flex:0 0 auto;
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .88);
+  color:var(--signal);
+  border:1px solid var(--signal-dim);
+  border-radius:calc(var(--u) * .28);
+  padding:calc(var(--u) * .12) calc(var(--u) * .5);
+  margin-top:calc(var(--u) * .22);
+  letter-spacing:.05em;
+}
+.steps.inf li > .m{color:var(--infra);border-color:var(--infra-dim)}
+.steps li b{color:var(--ink);font-weight:600}
+
+/* plain marker list — no false sequencing */
+.facts{display:flex;flex-direction:column;gap:calc(var(--u) * .88);list-style:none;padding:0;margin:0}
+.facts li{
+  position:relative;
+  padding-left:calc(var(--u) * 1.5);
+  font-size:var(--t-body);
+  color:var(--ink-2);
+  font-weight:300;
+  line-height:1.45;
+}
+.facts li::before{
+  content:"";
+  position:absolute;
+  left:0;top:calc(var(--u) * .62);
+  width:calc(var(--u) * .52);height:2px;
+  background:var(--infra);
+}
+.facts li b{color:var(--ink);font-weight:600}
+.facts.bad li::before{background:var(--fail)}
+.facts.sig li::before{background:var(--signal)}
+
+/* big number readout */
+.readout{display:flex;flex-direction:column;gap:calc(var(--u) * .2)}
+.readout .v{
+  font-family:"JetBrains Mono",monospace;
+  font-size:var(--t-data);
+  font-weight:700;
+  color:var(--signal);
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+}
+.readout .v.i{color:var(--infra)}
+.readout .v.r{color:var(--fail)}
+.readout .v.g{color:var(--ok)}
+.readout .l{font-size:calc(var(--u) * .95);color:var(--muted);font-family:"JetBrains Mono",monospace;letter-spacing:.11em;text-transform:uppercase}
+
+.panel{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .6);
+  padding:calc(var(--u) * 1.5) calc(var(--u) * 1.7);
+  display:flex;
+  flex-direction:column;
+  gap:calc(var(--u) * 1.05);
+}
+.panel .ptitle{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .86);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}
+  .pkt{opacity:1}
+}
+
+/* ============================================================
+   SLIDE-SPECIFIC SCENES
+   Colour carries meaning throughout: teal = Redis, violet = Postgres,
+   amber = a request in flight, rose = a miss or a failure.
+   ============================================================ */
+
+/* S1 — the hot layer: requests stopped by a teal wall, few reach violet */
+.s-hero{justify-content:center;gap:calc(var(--u) * 1.9)}
+.s-hero h1{font-size:var(--t-hero);letter-spacing:-.015em;max-width:20ch}
+.s-hero h1 span{color:var(--infra)}
+.barrier{
+  position:absolute;
+  right:calc(var(--u) * 6);
+  top:50%;
+  transform:translateY(-50%);
+  width:calc(var(--u) * 26);
+  height:calc(var(--u) * 26);
+  pointer-events:none;
+}
+.barrier .wall{
+  position:absolute;
+  left:50%;top:12%;
+  width:calc(var(--u) * .32);
+  height:76%;
+  margin-left:calc(var(--u) * -.16);
+  background:linear-gradient(180deg,transparent,var(--infra) 15%,var(--infra) 85%,transparent);
+  border-radius:99px;
+}
+.slide.is-active .barrier .wall{animation:glow 3s ease-in-out infinite}
+.barrier .db{
+  position:absolute;
+  right:6%;top:50%;
+  width:calc(var(--u) * 4.4);
+  height:calc(var(--u) * 4.4);
+  margin-top:calc(var(--u) * -2.2);
+  border:1px solid #4A3F86;
+  border-radius:calc(var(--u) * .5);
+  background:var(--panel);
+}
+.barrier .db::after{
+  content:"DB";
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * 1.1);
+  color:var(--violet);
+  letter-spacing:.12em;
+}
+.barrier i{
+  position:absolute;
+  left:0;
+  width:calc(var(--u) * .55);
+  height:calc(var(--u) * .55);
+  border-radius:50%;
+  background:var(--signal);
+  box-shadow:0 0 calc(var(--u) * 1.1) rgba(245,166,60,.7);
+  opacity:0;
+}
+.slide.is-active .barrier i{animation:hitwall 2.6s cubic-bezier(.3,.6,.6,1) infinite}
+.slide.is-active .barrier i.through{animation:passwall 2.6s cubic-bezier(.3,.6,.6,1) infinite}
+@keyframes hitwall{
+  0%{left:0;opacity:0;transform:scale(1)}
+  12%{opacity:1}
+  46%{left:48%;opacity:1;transform:scale(1)}
+  60%{left:48%;opacity:0;transform:scale(2.1)}
+  100%{left:48%;opacity:0}
+}
+@keyframes passwall{
+  0%{left:0;opacity:0}
+  12%{opacity:1}
+  46%{left:48%}
+  85%{left:84%;opacity:1}
+  100%{left:84%;opacity:0}
+}
+
+/* S2 — the eight jobs Redis actually does here */
+.roles{display:grid;grid-template-columns:repeat(4,1fr);gap:calc(var(--u) * 1.0);align-content:start}
+.role{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .5);
+  padding:calc(var(--u) * 1.15) calc(var(--u) * 1.25);
+  display:flex;
+  flex-direction:column;
+  gap:calc(var(--u) * .34);
+  min-width:0;
+}
+.role .rn{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * .78);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--infra);
+}
+.role .rt{font-size:calc(var(--u) * 1.38);font-weight:600;color:var(--ink);line-height:1.25}
+.role .rd{font-size:calc(var(--u) * 1.08);color:var(--ink-2);font-weight:300;line-height:1.4}
+
+/* S3 — four ioredis clients, four jobs */
+.lanes{display:flex;flex-direction:column;gap:calc(var(--u) * .8)}
+.lane-row{
+  display:grid;
+  grid-template-columns:calc(var(--u) * 13) 1fr;
+  gap:calc(var(--u) * 1.1);
+  align-items:center;
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .45);
+  background:var(--panel);
+  padding:calc(var(--u) * .7) calc(var(--u) * 1.0);
+}
+.lane-row .ln{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.14);color:var(--infra)}
+.lane-row .lw{font-size:calc(var(--u) * 1.18);color:var(--ink-2);font-weight:300;line-height:1.35}
+.lane-row.warn{border-color:#7A3448}
+.lane-row.warn .ln{color:var(--fail)}
+
+/* S4 — the cache envelope, annotated */
+.envelope{display:flex;flex-direction:column;gap:calc(var(--u) * .55)}
+.env-row{
+  display:grid;
+  grid-template-columns:calc(var(--u) * 15) 1fr;
+  gap:calc(var(--u) * 1.1);
+  align-items:baseline;
+}
+.env-row code{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.14);color:var(--infra)}
+.env-row span{font-size:calc(var(--u) * 1.16);color:var(--ink-2);font-weight:300;line-height:1.4}
+
+/* S5 — fresh / stale / miss, three doors */
+.doors{display:flex;flex-direction:column;gap:calc(var(--u) * 1.0)}
+.door{
+  display:grid;
+  grid-template-columns:calc(var(--u) * 7) 1fr;
+  align-items:center;
+  gap:calc(var(--u) * 1.2);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .5);
+  background:var(--panel);
+  padding:calc(var(--u) * .85) calc(var(--u) * 1.1);
+}
+.door .dstate{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * 1.45);
+  font-weight:700;
+  letter-spacing:.08em;
+}
+.door.fresh{border-color:#2E6B44}
+.door.fresh .dstate{color:var(--ok)}
+.door.stale{border-color:"8A5F22";border-color:#8A5F22}
+.door.stale .dstate{color:var(--signal)}
+.door.miss{border-color:#7A3448}
+.door.miss .dstate{color:var(--fail)}
+.door .dwhat{font-size:calc(var(--u) * 1.22);color:var(--ink-2);font-weight:300;line-height:1.4}
+.door .dwhat b{color:var(--ink);font-weight:600}
+
+/* S7 — two workers, one token */
+.tokens{display:flex;align-items:center;gap:calc(var(--u) * 1.3)}
+.holder{
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .45);
+  background:var(--panel);
+  padding:calc(var(--u) * 1.0) calc(var(--u) * 1.25);
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * 1.12);
+  color:var(--ink-2);
+  text-align:center;
+}
+.holder.own{border-color:#2E6B44;color:var(--ok)}
+.holder.other{border-color:#7A3448;color:var(--fail)}
+
+/* S8/S9 — key rows going dark under a version bump */
+.keys{display:flex;flex-direction:column;gap:calc(var(--u) * .48)}
+.keyrow{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * 1.04);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .32);
+  padding:calc(var(--u) * .46) calc(var(--u) * .85);
+  background:var(--panel);
+  color:var(--ink-2);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.keyrow .v{color:var(--signal)}
+.keyrow .v2{color:var(--infra)}
+.keyrow.dead{color:var(--muted);border-color:var(--line-soft);text-decoration:line-through;text-decoration-color:var(--fail)}
+.keyrow.live{border-color:var(--infra-dim);color:var(--ink)}
+.slide.is-active .keyrow.live{animation:glow 2.6s ease-in-out infinite}
+@keyframes glow{0%,100%{box-shadow:0 0 0 rgba(63,201,192,0)}50%{box-shadow:0 0 calc(var(--u) * 2.2) rgba(63,201,192,.28)}}
+
+/* S11 — query counter, before and after */
+.compare{display:flex;flex-direction:column;gap:calc(var(--u) * 1.3)}
+.cmp{display:flex;flex-direction:column;gap:calc(var(--u) * .45)}
+.cmp .ch{display:flex;justify-content:space-between;align-items:baseline}
+.cmp .cn{font-size:calc(var(--u) * 1.34);color:var(--ink);font-weight:600}
+.cmp .cv{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 2.0);font-weight:700;font-variant-numeric:tabular-nums}
+.cmp.before .cv{color:var(--fail)}
+.cmp.after .cv{color:var(--ok)}
+.qdots{display:flex;gap:calc(var(--u) * .3);align-items:center;min-height:calc(var(--u) * 1.1)}
+.qdots i{
+  width:calc(var(--u) * .85);height:calc(var(--u) * .85);
+  border-radius:calc(var(--u) * .18);
+  background:var(--violet);display:block;
+}
+.qdots i.none{background:transparent;border:1px dashed var(--line);}
+.qdots i.hit{background:var(--infra)}
+
+/* S12 — TTL ladder */
+.ttl{display:flex;flex-direction:column;gap:calc(var(--u) * .5)}
+.ttl-row{
+  display:grid;
+  grid-template-columns:calc(var(--u) * 17) calc(var(--u) * 6) 1fr;
+  gap:calc(var(--u) * 1.0);
+  align-items:center;
+  padding:calc(var(--u) * .42) 0;
+  border-bottom:1px solid var(--line-soft);
+}
+.ttl-row .tk{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.06);color:var(--ink-2)}
+.ttl-row .tv{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.2);color:var(--infra);font-weight:700;text-align:right}
+.ttl-row .tw{font-size:calc(var(--u) * 1.1);color:var(--muted);font-weight:300}
+
+/* S13 — one publish, six instances */
+.fanout{display:flex;align-items:center;gap:calc(var(--u) * 1.4)}
+.instances{display:flex;flex-direction:column;gap:calc(var(--u) * .42)}
+.instances i{
+  display:block;
+  width:calc(var(--u) * 5.2);
+  height:calc(var(--u) * .85);
+  border-radius:calc(var(--u) * .18);
+  background:var(--panel);
+  border:1px solid var(--infra-dim);
+}
+.slide.is-active .instances i{animation:pulse-dim 2.4s ease-in-out infinite}
+.instances i:nth-child(2){animation-delay:.1s}
+.instances i:nth-child(3){animation-delay:.2s}
+.instances i:nth-child(4){animation-delay:.3s}
+.instances i:nth-child(5){animation-delay:.4s}
+.instances i:nth-child(6){animation-delay:.5s}
+@keyframes pulse-dim{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* S14 — exact vs approximate memory */
+.mem{display:flex;flex-direction:column;gap:calc(var(--u) * 1.4)}
+.membar{display:flex;flex-direction:column;gap:calc(var(--u) * .42)}
+.membar .mh{display:flex;justify-content:space-between;align-items:baseline;font-size:calc(var(--u) * 1.2)}
+.membar .mn{color:var(--ink);font-weight:600}
+.membar .mv{font-family:"JetBrains Mono",monospace;font-weight:700}
+.membar .mt{height:calc(var(--u) * .85);background:var(--panel-2);border:1px solid var(--line);border-radius:99px;overflow:hidden}
+.membar .mt > b{display:block;height:100%}
+.membar.grow .mv{color:var(--fail)}
+.membar.grow .mt > b{background:linear-gradient(90deg,#5E2436,var(--fail));width:100%}
+.membar.flat .mv{color:var(--infra)}
+.membar.flat .mt > b{background:var(--infra);width:4%}
+
+/* S15 — round trips */
+.trips{display:flex;flex-direction:column;gap:calc(var(--u) * 1.2)}
+.trip{display:flex;flex-direction:column;gap:calc(var(--u) * .38)}
+.trip .th{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.14);color:var(--ink-2)}
+.hops{display:flex;gap:calc(var(--u) * .42);align-items:center}
+.hop{
+  flex:0 0 auto;
+  padding:calc(var(--u) * .5) calc(var(--u) * 1.0);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .3);
+  background:var(--panel);
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * 1.0);
+  color:var(--ink-2);
+}
+.hop.one{border-color:var(--infra-dim);color:var(--infra)}
+.hops .rt{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * .95);color:var(--muted);margin-left:calc(var(--u) * .5)}
+
+/* S16 — many events collapse into one pipeline */
+.buffer{display:flex;align-items:center;gap:calc(var(--u) * 1.2)}
+.swarm{display:grid;grid-template-columns:repeat(12,1fr);gap:calc(var(--u) * .24)}
+.swarm i{aspect-ratio:1;border-radius:50%;background:var(--signal-dim);display:block;opacity:.5}
+.slide.is-active .swarm i{animation:pop 3.2s ease-in-out infinite}
+@keyframes pop{0%,100%{opacity:.3;transform:scale(.7)}50%{opacity:1;transform:scale(1);background:var(--signal)}}
+.pipebox{
+  border:1px solid var(--infra-dim);
+  border-radius:calc(var(--u) * .5);
+  background:var(--panel);
+  padding:calc(var(--u) * 1.0) calc(var(--u) * 1.2);
+  text-align:center;
+}
+.slide.is-active .pipebox{animation:glow 2.6s ease-in-out infinite}
+
+/* S17 — stream lifecycle */
+.stream-flow{display:flex;flex-direction:column;gap:calc(var(--u) * .62)}
+.sf{
+  display:grid;
+  grid-template-columns:calc(var(--u) * 9.5) 1fr;
+  gap:calc(var(--u) * 1.0);
+  align-items:center;
+  border-left:2px solid var(--infra-dim);
+  padding:calc(var(--u) * .42) 0 calc(var(--u) * .42) calc(var(--u) * 1.0);
+}
+.sf code{font-family:"JetBrains Mono",monospace;font-size:calc(var(--u) * 1.1);color:var(--infra)}
+.sf span{font-size:calc(var(--u) * 1.14);color:var(--ink-2);font-weight:300;line-height:1.35}
+.sf.bad{border-left-color:#7A3448}
+.sf.bad code{color:var(--fail)}
+
+/* S19 — the fallback path */
+.fallback{display:flex;flex-direction:column;gap:calc(var(--u) * .8)}
+.fb{
+  display:flex;
+  align-items:center;
+  gap:calc(var(--u) * 1.0);
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .45);
+  background:var(--panel);
+  padding:calc(var(--u) * .8) calc(var(--u) * 1.05);
+}
+.fb .fi{
+  flex:0 0 auto;
+  width:calc(var(--u) * .55);height:calc(var(--u) * .55);
+  border-radius:50%;
+}
+.fb.ok .fi{background:var(--ok)}
+.fb.warn .fi{background:var(--signal)}
+.fb.bad .fi{background:var(--fail)}
+.fb .ft{font-size:calc(var(--u) * 1.2);color:var(--ink-2);font-weight:300;line-height:1.35}
+.fb .ft b{color:var(--ink);font-weight:600}
+
+/* S20/S21 — the improvement list, ranked by payoff */
+.improve{display:flex;flex-direction:column;gap:calc(var(--u) * .78)}
+.imp{
+  display:grid;
+  grid-template-columns:calc(var(--u) * 2.9) 1fr;
+  gap:calc(var(--u) * 1.3);
+  align-items:start;
+  border:1px solid var(--line);
+  border-radius:calc(var(--u) * .42);
+  background:var(--panel);
+  padding:calc(var(--u) * .85) calc(var(--u) * 1.2);
+}
+.imp .pri{
+  font-family:"JetBrains Mono",monospace;
+  font-size:calc(var(--u) * 1.15);
+  font-weight:700;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  padding:calc(var(--u) * .16) calc(var(--u) * .4);
+  border-radius:calc(var(--u) * .22);
+  text-align:center;
+  margin-top:calc(var(--u) * .12);
+}
+.imp .pri.high{color:var(--fail);border:1px solid #7A3448}
+.imp .pri.mid{color:var(--signal);border:1px solid var(--signal-dim)}
+.imp .pri.low{color:var(--infra);border:1px solid var(--infra-dim)}
+.imp .ib{display:flex;flex-direction:column;gap:calc(var(--u) * .18);min-width:0}
+.imp .it{font-size:calc(var(--u) * 1.28);font-weight:600;color:var(--ink);line-height:1.25}
+.imp .id{font-size:calc(var(--u) * 1.08);color:var(--ink-2);font-weight:300;line-height:1.4}
+</style>
+
+<div class="deck" id="deck">
+  <div class="slide-no mono" id="slideNo">01 / 22</div>
+  <div class="brandmark">Redis in Production</div>
+  <nav class="rail" id="rail" aria-label="স্লাইড"></nav>
+
+  <!-- ══ 01 ══════════════════════════════════════════════ -->
+  <section class="slide s-hero is-active" data-dur="18">
+    <div class="barrier" aria-hidden="true">
+      <span class="wall"></span>
+      <span class="db"></span>
+      <i style="top:18%"></i>
+      <i style="top:32%;animation-delay:.35s"></i>
+      <i class="through" style="top:46%;animation-delay:.7s"></i>
+      <i style="top:60%;animation-delay:1.05s"></i>
+      <i style="top:74%;animation-delay:1.4s"></i>
+    </div>
+    <div class="eyebrow">Backend System Design · বাংলা · পর্ব ২</div>
+    <h1>প্রোডাকশনে <span>Redis</span><br>সার্ভারকে যেভাবে<br>হালকা রেখেছি</h1>
+    <p class="lead">ক্যাশ, লক, কিউ, স্ট্রিম, Pub/Sub, রেট লিমিট, প্রেজেন্স — একটাই Redis, আটটা আলাদা কাজ। কোড থেকে, সাথে যা যা আরও ভালো করা যেত।</p>
+    <div class="chips">
+      <span class="chip i"><b>৮</b> ভূমিকা</span>
+      <span class="chip"><b>২০</b> ক্যাশড কোয়েরি</span>
+      <span class="chip g"><b>০</b> DB হিট — অথ চেকে</span>
+    </div>
+  </section>
+
+  <!-- ══ 02 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="46">
+    <div class="eyebrow rv">ম্যাপ</div>
+    <h2 class="rv">Redis এখানে আটটা আলাদা কাজ করছে</h2>
+    <div class="roles rv">
+      <div class="role"><span class="rn">01 · Cache</span><span class="rt">ডাটাবেজ বাঁচানো</span><span class="rd">অথ ইউজার, পারমিশন, কোর্স ক্যাটালগ, নোটিফিকেশন ফিড — ২০টা কল সাইট</span></div>
+      <div class="role"><span class="rn">02 · Lock</span><span class="rt">একবারই যেন চলে</span><span class="rd"><span class="mono">SET NX</span> + Lua রিলিজ। ক্যাশ ফিল, ক্যাম্পেইন, ডেস্কটপ লগইন</span></div>
+      <div class="role"><span class="rn">03 · Job Queue</span><span class="rt">BullMQ</span><span class="rd">নোটিফিকেশন, ট্রানজেকশন সিঙ্ক — রিট্রাই আর backoff সহ</span></div>
+      <div class="role"><span class="rn">04 · Stream</span><span class="rt">চ্যাট পারসিস্ট</span><span class="rd"><span class="mono">XADD</span> → consumer group → <span class="mono">XACK</span>, সাথে dead-letter</span></div>
+      <div class="role"><span class="rn">05 · Pub/Sub</span><span class="rt">Socket.IO adapter</span><span class="rd">৬টা PM2 ইনস্ট্যান্স একটাই রুম শেয়ার করে</span></div>
+      <div class="role"><span class="rn">06 · Rate Limit</span><span class="rt">শেয়ার্ড কাউন্টার</span><span class="rd"><span class="mono">rate-limit-redis</span> — ১২টা লিমিটার, IP আর আইডেন্টিটি দুই স্তরে</span></div>
+      <div class="role"><span class="rn">07 · Presence</span><span class="rt">কে অনলাইন</span><span class="rd">ZSET + HyperLogLog — ছোট রুমে exact, বড় রুমে approximate</span></div>
+      <div class="role"><span class="rn">08 · Temp State</span><span class="rt">অস্থায়ী স্টেট</span><span class="rd">ডেস্কটপ লগইন হ্যান্ডশেক — TTL শেষে নিজেই মুছে যায়</span></div>
+    </div>
+    <p class="lead rv" style="font-size:var(--t-small)">এই আটটার মধ্যে শুধু প্রথমটাই "ক্যাশ"। বাকি সাতটা Redis-কে ব্যবহার করছে এমন কাজে যেগুলো PostgreSQL দিয়ে করলে হয় ধীর হতো, নয়তো একেবারেই সম্ভব হতো না।</p>
+  </section>
+
+  <!-- ══ 03 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="38">
+    <div class="eyebrow rv">ভিত্তি</div>
+    <h2 class="rv">একটা নয়, চারটা আলাদা কানেকশন</h2>
+    <div class="cols wide-l rv">
+      <div class="lanes">
+        <div class="lane-row"><span class="ln">redisConnection</span><span class="lw">BullMQ, স্ট্রিম, প্রেজেন্স, রেট লিমিট — <b>ব্লকিং কমান্ড চলে</b></span></div>
+        <div class="lane-row"><span class="ln">redisPubClient</span><span class="lw">Socket.IO adapter — শুধু publish</span></div>
+        <div class="lane-row"><span class="ln">redisSubClient</span><span class="lw">Socket.IO adapter — subscribe মোডে আটকে থাকে</span></div>
+        <div class="lane-row"><span class="ln">redisCacheConnection</span><span class="lw">শুধু ক্যাশ — <b>commandTimeout ১৫০০ms</b>, <b>maxRetries ১</b></span></div>
+      </div>
+      <ul class="facts">
+        <li><b>Sub ক্লায়েন্ট আলাদা কেন</b> — subscribe মোডে থাকা কানেকশনে Redis অন্য কোনো কমান্ডই নেয় না, তাই ওটা শুধু ওই কাজেই</li>
+        <li><b>ক্যাশ ক্লায়েন্ট আলাদা কেন</b> — এটাই সবচেয়ে গুরুত্বপূর্ণ সিদ্ধান্ত। ক্যাশ রিড <b>১.৫ সেকেন্ডে</b> উত্তর না দিলে হাল ছেড়ে দেয়, রিট্রাই মাত্র একবার</li>
+        <li><b>ফল</b> — Redis ধীর হলে রিকোয়েস্ট <b>ঝুলে থাকে না</b>, সরাসরি DB থেকে পড়ে চলে যায়</li>
+        <li><b>lazyConnect</b> — অ্যাপ বুটের সময় <span class="mono">connectRedis()</span> সবগুলো একসাথে ধরায়, তারপর হেলথ ইভেন্ট লগ করে</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 04 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">ক্যাশ ইঞ্জিন ১/৩</div>
+    <h2 class="rv">ভ্যালু না, একটা খাম জমা রাখি</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="code inf">{
+  <span class="f">"version"</span>:    <span class="n">1</span>,
+  <span class="f">"freshUntil"</span>: <span class="n">1756800000000</span>,
+  <span class="f">"value"</span>:      { … আসল ডেটা … }
+}
+
+<span class="c">// Redis-এ লেখা হয়</span>
+SET key &lt;envelope&gt; PX &lt;freshTtl + staleTtl&gt;</div>
+        <div class="chips">
+          <span class="chip i"><b>±১০%</b> jitter</span>
+          <span class="chip"><b>version</b> মিসম্যাচ = auto purge</span>
+        </div>
+      </div>
+      <div class="envelope">
+        <div class="env-row"><code>version</code><span>ক্যাশের ফরম্যাট বদলালে পুরনো এন্ট্রি নিজে থেকেই বাতিল — <b>ম্যানুয়ালি ফ্লাশ করতে হয় না</b></span></div>
+        <div class="env-row"><code>freshUntil</code><span>Redis-এর TTL আর "ফ্রেশনেস" <b>আলাদা দুইটা জিনিস</b>। TTL শেষ হওয়ার আগেই ডেটা বাসি হতে পারে</span></div>
+        <div class="env-row"><code>jitter ±১০%</code><span>একসাথে লেখা হাজারটা key যেন <b>একই সেকেন্ডে</b> এক্সপায়ার না করে — নাহলে প্রতি TTL-এ একটা করে ঢেউ</span></div>
+        <div class="env-row"><code>JSON.parse fail</code><span>ভাঙা এন্ট্রি পেলে <span class="mono">DEL</span> করে <b>miss</b> রিটার্ন — এরর না</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 05 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">ক্যাশ ইঞ্জিন ২/৩</div>
+    <h2 class="rv">তিনটা অবস্থা, তিন রকম আচরণ</h2>
+    <div class="cols wide-l rv">
+      <div class="doors">
+        <div class="door fresh"><span class="dstate">FRESH</span><span class="dwhat"><b>সাথে সাথে ফেরত।</b> ডাটাবেজে যাওয়ার প্রশ্নই নেই — এটাই ৯৫% ক্ষেত্রে ঘটে</span></div>
+        <div class="door stale"><span class="dstate">STALE</span><span class="dwhat"><b>পুরনো ডেটাই ফেরত দিই সাথে সাথে</b>, আর পেছনে চুপচাপ রিফ্রেশ করি। ইউজার অপেক্ষা করে না</span></div>
+        <div class="door miss"><span class="dstate">MISS</span><span class="dwhat"><b>একজন লক নিয়ে DB-তে যায়</b>, বাকিরা অপেক্ষা করে ফলাফলের — পরের স্লাইডে বিস্তারিত</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>stale মানে কী</b> — <span class="mono">freshUntil</span> পার হয়েছে, কিন্তু Redis key এখনো বেঁচে আছে</li>
+        <li><b>কেন এই আলাদা করাটা দরকার</b> — TTL শেষে ডেটা <b>উধাও</b> হয়ে গেলে কাউকে না কাউকে DB-র জন্য অপেক্ষা করতেই হয়। stale থাকলে কাউকেই করতে হয় না</li>
+        <li><b>একটা সৎ কথা</b> — আমার <b>২০টা কল সাইটের ২০টাই</b> <span class="mono">getOrLoadStrictCache</span> ব্যবহার করে, যেখানে <span class="mono">staleTtlMs = 0</span>। মানে এই STALE দরজাটা আসলে <b>কখনো খোলেই না</b> — শেষ স্লাইডে এটা নিয়ে ফিরব</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 06 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="40">
+    <div class="eyebrow rv">ক্যাশ ইঞ্জিন ৩/৩</div>
+    <h2 class="rv">Cache Stampede — চার স্তরের প্রতিরোধ</h2>
+    <div class="cols wide-r rv">
+      <div class="stack">
+        <ul class="steps inf">
+          <li><span class="m">০১</span><span><b>singleFlight</b> — একই প্রসেসের ভেতর একই key চাইলে সবাই <b>একটাই Promise</b> শেয়ার করে</span></li>
+          <li><span class="m">০২</span><span><b>Redis lock</b> — প্রসেসের বাইরে, ছয়টা ইনস্ট্যান্সের মধ্যে <b>একজনই</b> DB-তে যায়</span></li>
+          <li><span class="m">০৩</span><span><b>Poll & wait</b> — বাকিরা ৪০–১০০ms র‍্যান্ডম গ্যাপে ক্যাশ চেক করে। র‍্যান্ডম, যাতে সবাই একসাথে না চেক করে</span></li>
+          <li><span class="m">০৪</span><span><b>Rescue lock</b> — অপেক্ষার সময় শেষেও ক্যাশ খালি? তখন আরেকবার লক নেওয়ার চেষ্টা, তারপরও না পারলে এরর</span></li>
+        </ul>
+        <div class="code inf"><span class="c">// লোডার ধীর হলে লক যেন এক্সপায়ার না করে</span>
+<span class="k">const</span> stop = <span class="f">startLockHeartbeat</span>(lock, lockTtlMs);
+<span class="c">// প্রতি lockTtl/3 এ PEXPIRE বাড়ায়</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>heartbeat কেন জরুরি</b> — লক ৫ সেকেন্ডের, কিন্তু কোয়েরি ৭ সেকেন্ড নিলে লক ছুটে যেত আর <b>দুইজন একসাথে</b> DB-তে ঢুকে পড়ত</li>
+        <li><b>ডাবল-চেক</b> — লক পাওয়ার <b>পরেও</b> আরেকবার ক্যাশ পড়ি। ততক্ষণে অন্য কেউ ভরে ফেলে থাকতে পারে</li>
+        <li><b>Redis একেবারেই না থাকলে</b> — <span class="mono">readCache</span> throw করে, তখন <span class="mono">singleFlight("redis-down:…")</span> দিয়ে সরাসরি DB, কিন্তু তখনও <b>একটাই কোয়েরি</b></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 07 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">লক</div>
+    <h2 class="rv">লক ছাড়াটাই আসল কঠিন অংশ</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="tokens">
+          <div class="holder own">Worker A<br>token = <b>a1b2</b></div>
+          <div class="holder">Redis<br>lock = <b>a1b2</b></div>
+          <div class="holder other">Worker B<br>token = <b>c3d4</b> ✗</div>
+        </div>
+        <div class="code inf"><span class="c">-- শুধু নিজের লকই ছাড়তে পারবে</span>
+<span class="k">if</span> redis.<span class="f">call</span>(<span class="s">"GET"</span>, KEYS[1]) == ARGV[1] <span class="k">then</span>
+  <span class="k">return</span> redis.<span class="f">call</span>(<span class="s">"DEL"</span>, KEYS[1])
+<span class="k">else</span>
+  <span class="k">return</span> <span class="n">0</span>
+<span class="k">end</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>সাধারণ DEL কেন বিপজ্জনক</b> — A-র লক এক্সপায়ার হলো, B নতুন লক নিলো, এখন A কাজ শেষ করে <span class="mono">DEL</span> করলে সে <b>B-র লক মুছে দিলো</b></li>
+        <li><b>তাই র‍্যান্ডম টোকেন</b> — <span class="mono">crypto.randomUUID()</span>, আর ছাড়ার আগে মিলিয়ে দেখা</li>
+        <li><b>Lua কেন</b> — GET আর DEL আলাদা করলে মাঝখানে রেস থেকে যেত। Lua স্ক্রিপ্ট Redis-এ <b>একটাই অবিভাজ্য অপারেশন</b></li>
+        <li><b>একই প্যাটার্ন তিন জায়গায়</b> — ক্যাশ ফিল, নোটিফিকেশন ক্যাম্পেইন, ডেস্কটপ লগইন এক্সচেঞ্জ</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 08 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="32">
+    <div class="eyebrow rv">ইনভ্যালিডেশন · কৌশল ১</div>
+    <h2 class="rv">key-টা জানা থাকলে — সরাসরি DELETE</h2>
+    <div class="cols wide-l rv">
+      <div class="keys">
+        <div class="keyrow live">cache:auth:user:v1:student:a91f…</div>
+        <div class="keyrow live">cache:authz:v1:course-student:a91f…:c47b…</div>
+        <div class="keyrow live">cache:authz:v1:course-context:e22d…</div>
+        <div class="keyrow live">cache:socket:restriction:v1:a91f…:CHAT</div>
+      </div>
+      <ul class="facts">
+        <li><b>কখন এটা ঠিক</b> — যখন key-এর নামটা <b>ঠিক জানা আছে</b>। প্রোফাইল আপডেট হলো? ওই একটা key মুছে দাও</li>
+        <li><b>এনরোলমেন্ট বাতিল হলে</b> — <span class="mono">invalidateCourseStudentAccess</span> ওই স্টুডেন্ট-কোর্স জোড়ার key মুছে দেয়, পরের রিকোয়েস্টেই সে আর ঢুকতে পারবে না</li>
+        <li><b>বাল্ক ভার্সনও আছে</b> — <span class="mono">Promise.allSettled</span> দিয়ে অনেকগুলো একসাথে, একটা ফেল করলেও বাকিগুলো হয়</li>
+        <li><b>সীমাবদ্ধতা</b> — একটা কোর্স এডিট হলে <b>কোন কোন লিস্ট</b> বদলাবে সেটা তো জানা নেই। ওখানেই এই কৌশল ভেঙে পড়ে</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 09 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="36">
+    <div class="eyebrow rv">ইনভ্যালিডেশন · কৌশল ২</div>
+    <h2 class="rv">key অসংখ্য হলে — মুছি না, ভার্সন বাড়াই</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="keys">
+          <div class="keyrow dead">cache:course-catalog:v1:list:frb:web:7c2f:<span class="v">v41</span></div>
+          <div class="keyrow dead">cache:course-catalog:v1:list:frb:app:9ab1:<span class="v">v41</span></div>
+          <div class="keyrow dead">cache:course-catalog:v1:list:acad:web:3e88:<span class="v">v41</span></div>
+          <div class="keyrow live">cache:course-catalog:v1:list:frb:web:7c2f:<span class="v">v42</span></div>
+        </div>
+        <div class="code inf"><span class="k">await</span> redis.<span class="f">incr</span>(<span class="s">"cache:course-catalog:v1:version"</span>);
+<span class="c">// ব্যস। একটা কমান্ড, লাখ লাখ key অচল।</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>কেন DELETE চলবে না</b> — কোয়েরি প্যারামিটার, হোস্ট, পেজ — সব মিলিয়ে <b>হাজার হাজার key</b>। খুঁজতে <span class="mono">SCAN</span> চালালে Redis ব্যস্ত হয়ে যাবে</li>
+        <li><b>ট্রিক</b> — ভার্সন নম্বরটা <b>key-এর নামের ভেতরেই</b>। <span class="mono">INCR</span> করলেই নতুন নাম, পুরনোগুলো কেউ আর চায় না</li>
+        <li><b>পুরনো key-এর কী হয়</b> — কেউ পড়ে না, TTL শেষে Redis নিজেই মুছে ফেলে। <b>আমাদের কিছু করতে হয় না</b></li>
+        <li><b>চার জায়গায় ব্যবহার</b> — কোর্স ক্যাটালগ, my-courses, লাইভ ক্লাস লিস্ট, নোটিফিকেশন ফিড</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 10 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">ইনভ্যালিডেশন · কৌশল ৩</div>
+    <h2 class="rv">দুইটা ভার্সন একসাথে — যেটা নিয়ে আমি সবচেয়ে খুশি</h2>
+    <div class="cols wide-l rv">
+      <div class="stack">
+        <div class="keys">
+          <div class="keyrow live">cache:student-my-courses:v1:list:a91f…:enrolled:7c2f:<span class="v">sv3</span>:<span class="v2">cv41</span></div>
+        </div>
+        <div class="code inf"><span class="k">const</span> [studentVersion, courseVersion] =
+  <span class="k">await</span> redis.<span class="f">mget</span>(
+    <span class="s">`…my-courses:v1:version:${studentId}`</span>,  <span class="c">// sv</span>
+    <span class="s">"cache:course-catalog:v1:version"</span>       <span class="c">// cv</span>
+  );</div>
+        <div class="chips">
+          <span class="chip"><b>sv</b> — শুধু এই স্টুডেন্টের</span>
+          <span class="chip i"><b>cv</b> — সবার জন্য এক</span>
+        </div>
+      </div>
+      <ul class="facts">
+        <li><b>সমস্যাটা</b> — "আমার কোর্স" লিস্ট দুইভাবে বদলাতে পারে। এক, স্টুডেন্ট নতুন কোর্স কিনলো। দুই, অ্যাডমিন কোর্সের নাম বা ছবি বদলালো</li>
+        <li><b>একটা ভার্সন হলে</b> — কোর্স এডিট করলে ৫ লাখ স্টুডেন্টের key একসাথে অচল, সবাই একসাথে DB-তে। আর স্টুডেন্ট-ভিত্তিক করলে কোর্স এডিট কারো কাছেই পৌঁছাত না</li>
+        <li><b>দুইটা রাখায়</b> — <span class="mono">sv</span> বাড়ে শুধু ওই একজনের জন্য, <span class="mono">cv</span> বাড়ে সবার জন্য। <b>যেটা যতটুকু বদলেছে, ঠিক ততটুকুই অচল হয়</b></li>
+        <li><b>একটাই MGET</b> — দুইটা ভার্সন এক রাউন্ড-ট্রিপে</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 11 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">সবচেয়ে বড় লাভ</div>
+    <h2 class="rv">প্রতিটা রিকোয়েস্টের অথ চেক</h2>
+    <div class="cols wide-l rv">
+      <div class="compare">
+        <div class="cmp before">
+          <div class="ch"><span class="cn">ক্যাশের আগে — প্রতি রিকোয়েস্টে</span><span class="cv">৪টি DB কোয়েরি</span></div>
+          <div class="qdots"><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="cmp after">
+          <div class="ch"><span class="cn">ক্যাশের পরে — প্রতি রিকোয়েস্টে</span><span class="cv">০টি DB কোয়েরি</span></div>
+          <div class="qdots"><i class="hit"></i><i class="hit"></i><i class="hit"></i><i class="none"></i></div>
+        </div>
+        <p class="lead" style="font-size:var(--t-small)">টিল রঙ = Redis থেকে এলো। এটা <b>একটা</b> এন্ডপয়েন্টের হিসাব না — এটা <b>সব</b> প্রোটেক্টেড এন্ডপয়েন্টের হিসাব।</p>
+      </div>
+      <ul class="facts">
+        <li><b>১. ইউজার কে</b> — <span class="mono">getCachedAuthUser</span>, TTL ৬০s। সাথে অ্যাক্টিভ ব্যান/রেস্ট্রিকশনও</li>
+        <li><b>২. এই আইডিটা কোন কোর্সের</b> — <span class="mono">getCachedCourseContext</span>, TTL ২ মিনিট। ক্লাস, চ্যাপ্টার, ভিডিও — যেকোনো আইডি থেকে কোর্স</li>
+        <li><b>৩. তার কি এই কোর্সে অ্যাক্সেস আছে</b> — <span class="mono">hasCourseStudentAccess</span>, TTL ২ মিনিট</li>
+        <li><b>ব্যান চেকের ট্রিক</b> — মেয়াদোত্তীর্ণ রেস্ট্রিকশন <b>ক্যাশ থেকে পড়ার পর</b> ফিল্টার করা হয়, তাই ব্যান শেষ হওয়ার জন্য TTL-এর অপেক্ষা করতে হয় না</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 12 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="34">
+    <div class="eyebrow rv">TTL</div>
+    <h2 class="rv">কোন ডেটা কতক্ষণ — আর কেন</h2>
+    <div class="cols wide-l rv">
+      <div class="ttl">
+        <div class="ttl-row"><span class="tk">notification feed</span><span class="tv">২০s</span><span class="tw">ইউজার বারবার রিফ্রেশ করে, বাসি দেখালে চোখে পড়ে</span></div>
+        <div class="ttl-row"><span class="tk">course catalog · my-courses</span><span class="tv">৩০s</span><span class="tw">ভার্সন বাম্প আছে, তাই TTL শুধু শেষ ভরসা</span></div>
+        <div class="ttl-row"><span class="tk">auth user · session</span><span class="tv">৬০s</span><span class="tw">ব্যান বা ডিঅ্যাক্টিভেট ১ মিনিটের মধ্যে কার্যকর হতেই হবে</span></div>
+        <div class="ttl-row"><span class="tk">authz · membership</span><span class="tv">২ মিনিট</span><span class="tw">এনরোলমেন্ট বদলালে সরাসরি DELETE হয়, তাই লম্বা TTL নিরাপদ</span></div>
+        <div class="ttl-row"><span class="tk">live class list</span><span class="tv">২ মিনিট</span><span class="tw">রুটিন ঘন ঘন বদলায় না</span></div>
+        <div class="ttl-row"><span class="tk">push token list</span><span class="tv">১০ মিনিট</span><span class="tw">টোকেন প্রায় বদলায়ই না</span></div>
+        <div class="ttl-row"><span class="tk">socket user (chat)</span><span class="tv">১২০s</span><span class="tw">নাম আর অ্যাভাটার — একটু বাসি হলেও ক্ষতি নেই</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>নিয়মটা সহজ</b> — TTL ঠিক করে <b>ডেটার গুরুত্ব</b>, আকার নয়। ভুল ডেটা দেখালে কতটা ক্ষতি, সেটাই প্রশ্ন</li>
+        <li><b>অথ কেন মাত্র ৬০s</b> — কাউকে ব্যান করার পর সে যদি ৫ মিনিট ঢুকতে পারে, সেটা <b>নিরাপত্তার সমস্যা</b>। তাই TTL ছোট</li>
+        <li><b>পারমিশন কেন ২ মিনিট</b> — কারণ এখানে <b>সরাসরি DELETE</b>-ও আছে। TTL শুধু সেফটি নেট, প্রধান ব্যবস্থা নয়</li>
+        <li><b>যেখানে ইনভ্যালিডেশন নেই, সেখানে TTL ছোট</b> — এটাই মূল ট্রেড-অফ</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 13 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">রিয়েলটাইম ১/৫</div>
+    <h2 class="rv">Pub/Sub — ছয়টা প্রসেস, একটাই রুম</h2>
+    <div class="cols rv">
+      <div class="fanout">
+        <div class="node inf" style="flex:0 0 auto"><span class="nk">Redis</span><span class="nn">Pub/Sub</span><span class="nd">sharded adapter</span></div>
+        <div class="wire" style="flex:0 0 calc(var(--u) * 4)"><i class="pkt t"></i><i class="pkt t d2"></i></div>
+        <div class="instances">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <span class="mono" style="font-size:calc(var(--u) * .95);color:var(--muted)">৬টি<br>PM2<br>instance</span>
+      </div>
+      <ul class="facts">
+        <li><b>সমস্যাটা</b> — PM2 cluster মানে ছয়টা <b>আলাদা Node প্রসেস</b>। স্টুডেন্ট A ইনস্ট্যান্স ১-এ, স্টুডেন্ট B ইনস্ট্যান্স ৪-এ। A চ্যাট করলে B পাবে না</li>
+        <li><b>সমাধান</b> — <span class="mono">@socket.io/redis-adapter</span>। যেকোনো ইনস্ট্যান্স emit করলে Redis-এ publish হয়, বাকি পাঁচটা subscribe করে নিজেদের ক্লায়েন্টদের পাঠায়</li>
+        <li><b>sharded adapter কেন</b> — সাধারণ adapter <b>একটাই</b> চ্যানেল ব্যবহার করে, তাই প্রতিটা ইনস্ট্যান্স সব মেসেজ পায় — দরকার না হলেও। sharded ভার্সন Redis-এর shard channel ব্যবহার করে, <b>অপ্রয়োজনীয় ট্রাফিক অনেক কমে</b></li>
+        <li><b>ট্রান্সপোর্ট শুধু websocket</b> — polling বন্ধ, তাই HTTP round-trip-এর বাড়তি চাপ নেই</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 14 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="42">
+    <div class="eyebrow rv">রিয়েলটাইম ২/৫</div>
+    <h2 class="rv">কতজন দেখছে — ZSET আর HyperLogLog</h2>
+    <div class="cols wide-l rv">
+      <div class="mem">
+        <div class="membar grow">
+          <div class="mh"><span class="mn">ZSET — প্রতিটা ইউজার আলাদা করে</span><span class="mv">প্রতি ইউজারে ~৭০ বাইট</span></div>
+          <div class="mt"><b></b></div>
+        </div>
+        <div class="membar flat">
+          <div class="mh"><span class="mn">HyperLogLog — শুধু সংখ্যাটা</span><span class="mv">সবসময় ১২ KB</span></div>
+          <div class="mt"><b></b></div>
+        </div>
+        <p class="lead" style="font-size:var(--t-small)"><b>৫০০ জনের নিচে</b> — ZSET, একদম নিখুঁত সংখ্যা আর প্রত্যেকের অ্যাভাটার।<br><b>৫০০-র উপরে</b> — HyperLogLog, ~০.৮% ভুল হতে পারে, কিন্তু ৫ হাজার হোক বা ৫ লাখ, মেমোরি <b>একই ১২ KB</b>।</p>
+      </div>
+      <ul class="facts">
+        <li><b>কেন হাইব্রিড</b> — ছোট ক্লাসে টিচার প্রত্যেককে দেখতে চান। বড় লাইভে "১,২৪,৩৮২ জন দেখছে" — ২০০ জন এদিক-ওদিক হলে <b>কেউ টেরও পাবে না</b></li>
+        <li><b>স্লাইডিং উইন্ডো</b> — ৩০ সেকেন্ডের ৩টা bucket। <span class="mono">PFCOUNT</span> তিনটা একসাথে মার্জ করে, তাই "গত ৯০ সেকেন্ডে সক্রিয়" — এক ঝলকে চলে যাওয়া লোক গোনা হয় না</li>
+        <li><b>ZSET-এর score = timestamp</b> — <span class="mono">ZREMRANGEBYSCORE</span> দিয়ে পুরনোদের ছাঁটাই এক কমান্ডেই</li>
+        <li><b>নিরাপত্তা</b> — approx যদি exact-এর চেয়ে কম আসে, exact-টাই ফেরত দেওয়া হয়। কাউন্ট কখনো <b>পিছিয়ে যায় না</b></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 15 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="32">
+    <div class="eyebrow rv">রিয়েলটাইম ৩/৫</div>
+    <h2 class="rv">চারটা কমান্ড, একটাই রাউন্ড-ট্রিপ</h2>
+    <div class="cols wide-l rv">
+      <div class="trips">
+        <div class="trip">
+          <div class="th">আলাদা আলাদা পাঠালে</div>
+          <div class="hops">
+            <span class="hop">PFADD</span><span class="hop">ZCARD</span><span class="hop">ZADD</span><span class="hop">EXPIRE</span>
+            <span class="rt">৪ × RTT</span>
+          </div>
+        </div>
+        <div class="trip">
+          <div class="th">Lua স্ক্রিপ্টে</div>
+          <div class="hops">
+            <span class="hop one">watchMarkActive</span>
+            <span class="rt">১ × RTT · আর পুরোটা atomic</span>
+          </div>
+        </div>
+        <div class="code inf"><span class="c">-- ZSET-এ শুধু তখনই লিখি যখন রুম ছোট</span>
+<span class="k">local</span> size = redis.<span class="f">call</span>(<span class="s">'ZCARD'</span>, KEYS[1])
+<span class="k">if</span> size &lt; limit <span class="k">then</span>
+  redis.<span class="f">call</span>(<span class="s">'ZADD'</span>, KEYS[1], <span class="k">unpack</span>(zargs))
+  redis.<span class="f">call</span>(<span class="s">'EXPIRE'</span>, KEYS[1], zttl)
+<span class="k">end</span></div>
+      </div>
+      <ul class="facts">
+        <li><b>কেন এত গুরুত্বপূর্ণ</b> — Redis <b>একটাই থ্রেডে</b> চলে। কমান্ড দ্রুত, কিন্তু নেটওয়ার্ক রাউন্ড-ট্রিপ দ্রুত না। ৪টার বদলে ১টা মানে ৪ গুণ কম অপেক্ষা</li>
+        <li><b>সিদ্ধান্তটাও ভেতরে</b> — "রুম কি ৫০০-র কম?" — এই চেকটা Redis-এর ভেতরেই হয়। Node-এ আনলে মাঝখানে সংখ্যা বদলে যেতে পারত</li>
+        <li><b>defineCommand</b> — ioredis স্ক্রিপ্টটা একবার লোড করে <span class="mono">EVALSHA</span> দিয়ে চালায়, তাই প্রতিবার পুরো স্ক্রিপ্ট পাঠাতে হয় না</li>
+        <li><b>তিনটা স্ক্রিপ্ট</b> — <span class="mono">markActive</span>, <span class="mono">onlineCount</span>, <span class="mono">shouldEmit</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 16 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="36">
+    <div class="eyebrow rv">রিয়েলটাইম ৪/৫</div>
+    <h2 class="rv">Redis-কেও বাঁচাতে হয় — বাফারিং</h2>
+    <div class="cols wide-r rv">
+      <div class="stack">
+        <div class="buffer">
+          <div class="swarm" data-dots="72" aria-hidden="true"></div>
+          <div class="wire" style="flex:0 0 calc(var(--u) * 3)"><i class="pkt"></i><i class="pkt d2"></i></div>
+          <div class="pipebox">
+            <div class="readout" style="align-items:center">
+              <span class="v i">১</span><span class="l">pipeline</span>
+            </div>
+          </div>
+        </div>
+        <div class="chips">
+          <span class="chip"><b>প্রেজেন্স</b> ১ সেকেন্ড</span>
+          <span class="chip"><b>চ্যাট</b> ১২০ms</span>
+          <span class="chip i"><b>প্রোগ্রেস → DB</b> ৩০ সেকেন্ড</span>
+        </div>
+      </div>
+      <ul class="facts">
+        <li><b>সমস্যাটা</b> — ৫০ হাজার স্টুডেন্ট ভিডিও দেখছে, প্রত্যেকে সেকেন্ডে একটা করে প্রোগ্রেস ইভেন্ট পাঠাচ্ছে। প্রতিটা সরাসরি Redis-এ লিখলে <b>Redis-ই বটলনেক</b></li>
+        <li><b>প্রেজেন্স</b> — ১ সেকেন্ডের বাফার, তারপর <b>একটা pipeline</b>-এ সব। ৩০০ জন করে চাঙ্কে ভাগ, যাতে একটা কমান্ড অতিরিক্ত বড় না হয়</li>
+        <li><b>প্রোগ্রেস</b> — মেমোরিতে <span class="mono">Map</span>-এ জমে, একই ইউজারের নতুন ইভেন্ট পুরনোটা <b>ওভাররাইট</b> করে। ৩০ সেকেন্ড পর ১০০০ করে DB-তে</li>
+        <li><b>ফেল করলে</b> — <span class="mono">requeue()</span> রো-গুলো বাফারে ফিরিয়ে দেয়, পরের ফ্লাশে আবার চেষ্টা</li>
+        <li><b>টাইমার সব <span class="mono">unref()</span></b> — প্রসেস বন্ধ হওয়ার সময় এগুলো আটকে রাখে না</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 17 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="42">
+    <div class="eyebrow rv">রিয়েলটাইম ৫/৫</div>
+    <h2 class="rv">চ্যাট — Redis Streams, একটাও মেসেজ হারায় না</h2>
+    <div class="cols wide-r rv">
+      <div class="stream-flow">
+        <div class="sf"><code>XADD</code><span>মেসেজ স্ট্রিমে, <span class="mono">MAXLEN ~ 100000</span> — পুরনো নিজে থেকেই ছাঁটাই</span></div>
+        <div class="sf"><code>XREADGROUP</code><span>ওয়ার্কার ২০০টা করে পড়ে, <span class="mono">BLOCK 5000</span> — খালি থাকলে অপেক্ষা, পোলিং নয়</span></div>
+        <div class="sf"><code>saveChats()</code><span>একসাথে সব DB-তে</span></div>
+        <div class="sf"><code>XACK</code><span>সফল হলেই কেবল স্ট্রিম থেকে "পড়া হয়েছে" চিহ্ন</span></div>
+        <div class="sf bad"><code>ব্যাচ ফেল</code><span>তখন <b>একটা একটা করে</b> আবার চেষ্টা — একটা খারাপ মেসেজের জন্য ২০০টা যেন না হারায়</span></div>
+        <div class="sf bad"><code>XADD :dead</code><span>তাতেও ফেল? dead-letter স্ট্রিমে কারণসহ, তারপর ACK</span></div>
+        <div class="sf"><code>XAUTOCLAIM</code><span>ওয়ার্কার ক্র্যাশ করলে ৩০ সেকেন্ড পর অন্য ওয়ার্কার তার কাজ <b>দখল করে নেয়</b></span></div>
+      </div>
+      <ul class="facts">
+        <li><b>Pub/Sub না কেন</b> — Pub/Sub-এ কেউ না শুনলে মেসেজ <b>হারিয়ে যায়</b>। Stream ধরে রাখে যতক্ষণ না ACK হয়</li>
+        <li><b>consumer group</b> — একাধিক ওয়ার্কার চালালে প্রত্যেকে <b>আলাদা</b> মেসেজ পায়, একই মেসেজ দুইবার সেভ হয় না</li>
+        <li><b>MAXLEN ~ কেন</b> — <span class="mono">~</span> মানে "প্রায়"। Redis-কে নিখুঁত ছাঁটাই করতে বললে সেটা ধীর, আনুমানিক বললে দ্রুত</li>
+        <li><b>হেলথ লগ</b> — প্রতি মিনিটে <span class="mono">XLEN</span> আর <span class="mono">XPENDING</span>। pending বাড়তে থাকলে বোঝা যায় ওয়ার্কার পিছিয়ে পড়ছে</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 18 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="28">
+    <div class="eyebrow rv">সুরক্ষা</div>
+    <h2 class="rv">রেট লিমিট — কাউন্টারটা Redis-এ কেন</h2>
+    <div class="cols rv">
+      <div class="stack">
+        <div class="code inf"><span class="k">export const</span> logInRouteLimiter = <span class="f">rateLimit</span>({
+  store: <span class="k">new</span> <span class="f">RedisStore</span>({
+    sendCommand: (...args) =&gt; redis.<span class="f">call</span>(...args)
+  }),
+  windowMs: <span class="n">5</span> * <span class="n">60</span> * <span class="n">1000</span>,
+  max: <span class="n">5000</span>,
+  keyGenerator: (req) =&gt;
+    <span class="f">normalizeIdentifier</span>(req?.body?.emailOrPhone) || req?.ip
+});</div>
+        <div class="chips">
+          <span class="chip i"><b>১২টি</b> আলাদা লিমিটার</span>
+          <span class="chip"><b>২</b> স্তর — IP + আইডেন্টিটি</span>
+        </div>
+      </div>
+      <ul class="facts">
+        <li><b>মেমোরিতে রাখলে যা হতো</b> — ছয়টা ইনস্ট্যান্স, ছয়টা আলাদা কাউন্টার। লিমিট ৫০০ দিলে অ্যাটাকার আসলে <b>৩০০০</b> রিকোয়েস্ট পেত</li>
+        <li><b>Redis-এ রাখায়</b> — কাউন্টার একটাই, লোড ব্যালেন্সার যেখানেই পাঠাক</li>
+        <li><b>দুই স্তরের কারণ</b> — শুধু IP দিলে একই অফিস বা মোবাইল অপারেটরের সবাই একসাথে ব্লক হয়ে যেত। তাই ফোন/ইমেইল ধরেও আলাদা লিমিট</li>
+        <li><b>OTP রিসেন্ডে চালাকি</b> — কুকির রিফ্রেশ টোকেন ডিকোড করে <b>ইউজার আইডি</b> দিয়ে লিমিট, তাই নম্বর বদলে বদলে চেষ্টা করেও লাভ নেই</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 19 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="30">
+    <div class="eyebrow rv">ব্যর্থতা</div>
+    <h2 class="rv">Redis মরে গেলে সাইট মরে যায় না</h2>
+    <div class="cols wide-l rv">
+      <div class="fallback">
+        <div class="fb ok"><span class="fi"></span><span class="ft"><b>Redis সুস্থ</b> — ক্যাশ থেকে উত্তর, ডাটাবেজ প্রায় বসে থাকে</span></div>
+        <div class="fb warn"><span class="fi"></span><span class="ft"><b>Redis ধীর</b> — ১৫০০ms-এ টাইমআউট, <span class="mono">catch</span> ধরে সরাসরি DB। ইউজার শুধু একটু দেরি টের পায়</span></div>
+        <div class="fb bad"><span class="fi"></span><span class="ft"><b>Redis একেবারে ডাউন</b> — প্রতিটা ক্যাশ ফাংশন <span class="mono">loader()</span> কল করে। <b>সাইট ধীর হয়, বন্ধ হয় না</b></span></div>
+      </div>
+      <ul class="facts">
+        <li><b>নিয়মটা</b> — ক্যাশ একটা <b>অপ্টিমাইজেশন</b>, নির্ভরতা নয়। ক্যাশ ফেল করলে ফিচার ফেল করা উচিত না</li>
+        <li><b>কোডে যেভাবে</b> — প্রতিটা <span class="mono">getCached…</span> ফাংশনে <span class="mono">try/catch</span>, <span class="mono">catch</span>-এ <span class="mono">return loader()</span></li>
+        <li><b>সৎ কথা</b> — এটা <b>ক্যাশের জন্য</b> সত্যি। কিন্তু কিউ, স্ট্রিম আর Socket.IO adapter Redis ছাড়া <b>চলবে না</b> — ওখানে Redis একটা আসল নির্ভরতা</li>
+        <li><b>তাই</b> — Redis-এর আপটাইম আর মেমোরি মনিটর করাটা ঐচ্ছিক না</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 20 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="52">
+    <div class="eyebrow rv">উন্নতি ১/২</div>
+    <h2 class="rv">যেগুলো আমি এখনই ঠিক করব</h2>
+    <div class="improve rv">
+      <div class="imp">
+        <span class="pri high">১</span>
+        <div class="ib">
+          <span class="it">ক্যাশ আর কিউ একই Redis-এ — এটাই সবচেয়ে বড় ঝুঁকি</span>
+          <span class="id">ক্যাশ key মুছে গেলে কিছু হয় না, কিন্তু BullMQ-র জব বা চ্যাট স্ট্রিম মুছে গেলে <b>ডেটা হারায়</b>। মেমোরি ভরলে <span class="mono">allkeys-lru</span> দুইটার পার্থক্য বোঝে না। <b>সমাধান:</b> দুইটা আলাদা Redis — ক্যাশেরটায় <span class="mono">allkeys-lru</span>, কিউ/স্ট্রিমেরটায় <span class="mono">noeviction</span> + AOF।</span>
+        </div>
+      </div>
+      <div class="imp">
+        <span class="pri high">২</span>
+        <div class="ib">
+          <span class="it"><span class="mono">maxmemory</span> সেট করা</span>
+          <span class="id">লিমিট না দিলে Redis RAM ভরে যাওয়া পর্যন্ত বাড়তেই থাকে, তারপর OS একদিন প্রসেসটাকে <b>মেরে ফেলে</b>। RAM-এর ~৭৫% এ <span class="mono">maxmemory</span> বেঁধে দিলে Redis নিজেই পুরনো key ছাঁটাই শুরু করে — নিয়ন্ত্রিতভাবে।</span>
+        </div>
+      </div>
+      <div class="imp">
+        <span class="pri high">৩</span>
+        <div class="ib">
+          <span class="it">hit / miss মেট্রিক — এখন <b>একটাও নেই</b></span>
+          <span class="id">Prometheus আছে, কিন্তু সেটা শুধু API ওয়ার্কার স্ক্রেপ করে। <b>কোন ক্যাশটা আসলে কাজ করছে</b> সেটা এখন অনুমান। <span class="mono">redis_exporter</span> + প্রতিটা <span class="mono">getOrLoadCache</span>-এ একটা কাউন্টার বসালে হিট রেট দেখা যাবে — ৪০% হিট রেটের ক্যাশ রাখার চেয়ে ফেলে দেওয়াই ভালো।</span>
+        </div>
+      </div>
+      <div class="imp">
+        <span class="pri high">৪</span>
+        <div class="ib">
+          <span class="it">BullMQ-র জন্য আলাদা কানেকশন</span>
+          <span class="id">এখন <span class="mono">redisConnection</span> একাই BullMQ, রেট লিমিট, প্রেজেন্স, স্ট্রিম আর ডেস্কটপ অথ চালাচ্ছে। BullMQ নিজে ব্লকিং কমান্ড ব্যবহার করে, তাই একটা ধীর অপারেশন <b>বাকি সবাইকে আটকে দিতে পারে</b>। ক্যাশের জন্য যেমন আলাদা ক্লায়েন্ট করেছি, ঠিক তেমনই।</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 21 ══════════════════════════════════════════════ -->
+  <section class="slide" data-dur="50">
+    <div class="eyebrow rv">উন্নতি ২/২</div>
+    <h2 class="rv">যেগুলো পরে করলেও চলবে</h2>
+    <div class="improve rv">
+      <div class="imp">
+        <span class="pri mid">৫</span>
+        <div class="ib">
+          <span class="it">stale-while-revalidate আসলে ব্যবহারই হচ্ছে না</span>
+          <span class="id">cache.aside-এ সুন্দর ব্যাকগ্রাউন্ড-রিফ্রেশ কোড লেখা আছে, কিন্তু <b>২৩টার মধ্যে ২০টা</b> কল সাইট <span class="mono">getOrLoadStrictCache</span> ব্যবহার করে, যেখানে <span class="mono">staleTtlMs = 0</span> — মানে key ফ্রেশনেস শেষ হওয়ার ঠিক সেই মুহূর্তেই মুছেও যায়। ফলে প্রতি TTL-এ একজনকে DB-র জন্য অপেক্ষা করতেই হয়। কোর্স ক্যাটালগ বা লাইভ ক্লাস লিস্টে <b>staleTtl ৬০s</b> দিলে ওই অপেক্ষাটাও থাকত না।</span>
+        </div>
+      </div>
+      <div class="imp">
+        <span class="pri mid">৬</span>
+        <div class="ib">
+          <span class="it">বড় রুমে <span class="mono">HGETALL</span></span>
+          <span class="id"><span class="mono">getWatchUsers</span> ৫০০ ফিল্ড পর্যন্ত একবারে টানে। Redis একটাই থ্রেডে চলে, তাই বড় <span class="mono">HGETALL</span> চলাকালীন <b>বাকি সব কমান্ড অপেক্ষা করে</b>। <span class="mono">HSCAN</span> দিয়ে ভাগে ভাগে, অথবা অ্যাভাটার লিস্টটা কম ঘন ঘন পাঠানো।</span>
+        </div>
+      </div>
+      <div class="imp">
+        <span class="pri low">৭</span>
+        <div class="ib">
+          <span class="it">key প্রিফিক্স একটা কনভেনশনে আনা</span>
+          <span class="id">এখন <span class="mono">cache:</span>, <span class="mono">presence:</span>, <span class="mono">hll:</span>, <span class="mono">meta:</span>, <span class="mono">rl:</span>, <span class="mono">lock:</span>, <span class="mono">dedup:</span>, <span class="mono">metrics:</span> — সবই আলাদা। সব ক্যাশ key যদি <span class="mono">cache:</span> দিয়েই শুরু হতো, তাহলে <b>শুধু ক্যাশটুকু</b> ফ্লাশ করা বা আলাদা করে মাপা সহজ হতো।</span>
+        </div>
+      </div>
+      <div class="imp">
+        <span class="pri low">৮</span>
+        <div class="ib">
+          <span class="it">অথ ইউজারের জন্য প্রসেস-লোকাল একটা ছোট LRU</span>
+          <span class="id"><span class="mono">getCachedAuthUser</span> <b>প্রতিটা রিকোয়েস্টে</b> চলে — Redis দ্রুত, কিন্তু ০ নয়। ২–৩ সেকেন্ডের একটা ইন-মেমোরি LRU সামনে বসালে সবচেয়ে ব্যস্ত ইউজারদের জন্য Redis রাউন্ড-ট্রিপটাও বেঁচে যেত। ঝুঁকি — ব্যান কার্যকর হতে ওই কয়েক সেকেন্ড বেশি লাগবে।</span>
+        </div>
+      </div>
+      <div class="imp">
+        <span class="pri low">৯</span>
+        <div class="ib">
+          <span class="it">রেপ্লিকা আর স্লো-লগ</span>
+          <span class="id">এখন একটাই Redis ইনস্ট্যান্স — এটা <b>single point of failure</b>। একটা রেপ্লিকা + Sentinel দিলে ফেইলওভার হয়। আর <span class="mono">SLOWLOG</span> চালু রাখলে কোন কমান্ড ধীর সেটা ধরা পড়ে <b>সমস্যা হওয়ার আগেই</b>।</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 22 ══════════════════════════════════════════════ -->
+  <section class="slide s-hero" data-dur="32">
+    <div class="barrier" aria-hidden="true">
+      <span class="wall"></span>
+      <span class="db"></span>
+      <i style="top:22%"></i>
+      <i class="through" style="top:44%;animation-delay:.6s"></i>
+      <i style="top:66%;animation-delay:1.2s"></i>
+    </div>
+    <div class="eyebrow">সারসংক্ষেপ</div>
+    <h2 style="font-size:calc(var(--u) * 3.3);max-width:19ch">Redis-এর কাজ ডাটাবেজকে<br>বিশ্রাম দেওয়া</h2>
+    <div style="display:flex;gap:calc(var(--u) * 3.2);margin-top:calc(var(--u) * .8)">
+      <div class="readout"><span class="v i">৮</span><span class="l">আলাদা ভূমিকা</span></div>
+      <div class="readout"><span class="v">২৩</span><span class="l">ক্যাশড কোয়েরি</span></div>
+      <div class="readout"><span class="v g">৪</span><span class="l">স্তরের stampede রক্ষা</span></div>
+      <div class="readout"><span class="v r">৯</span><span class="l">উন্নতির জায়গা</span></div>
+    </div>
+    <ul class="facts" style="max-width:58ch;margin-top:calc(var(--u) * .5)">
+      <li><b>TTL ঠিক করে গুরুত্ব</b> — ভুল ডেটা দেখালে কতটা ক্ষতি, সেটাই একমাত্র প্রশ্ন</li>
+      <li><b>key জানা থাকলে DELETE, না জানলে INCR</b> — <span class="mono">SCAN</span> কখনো নয়</li>
+      <li><b>রাউন্ড-ট্রিপ কমাও</b> — pipeline, Lua, MGET, বাফার</li>
+      <li><b>ক্যাশ ফেল করলে ফিচার ফেল করা উচিত না</b> — কিন্তু কিউ আর স্ট্রিমের জন্য এটা খাটে না</li>
+    </ul>
+  </section>
+
+  <div class="bar"><i id="progress"></i></div>
+  <div class="hint" id="hint">
+    <span><b>← →</b> স্লাইড</span>
+    <span><b>A</b> অটোপ্লে</span>
+    <span><b>N</b> স্ক্রিপ্ট</span>
+    <span><b>F</b> ফুলস্ক্রিন</span>
+  </div>
+
+  <aside class="prompt" id="prompt" aria-live="polite">
+    <div class="ph" id="promptHead">স্লাইড ০১</div>
+    <p class="pt" id="promptText"></p>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const deck    = document.getElementById("deck");
+  const slides  = [...deck.querySelectorAll(".slide")];
+  const rail    = document.getElementById("rail");
+  const bar     = document.getElementById("progress");
+  const slideNo = document.getElementById("slideNo");
+  const prompt  = document.getElementById("prompt");
+  const pHead   = document.getElementById("promptHead");
+  const pText   = document.getElementById("promptText");
+  const hint    = document.getElementById("hint");
+
+  /* ---- teleprompter: what to say on each slide ---- */
+  const script = [
+    "আসসালামু আলাইকুম। গত পর্বে দেখিয়েছিলাম কীভাবে লাখ লাখ ইউজারকে ফ্রিতে নোটিফিকেশন পাঠাই। আজকে তার <em>নিচের স্তরটা</em> — Redis। আমার ব্যাকএন্ডে Redis শুধু ক্যাশ না, <em>আটটা আলাদা কাজ</em> করছে। আজকে দেখাবো প্রতিটা কীভাবে কাজ করে, কোন সিদ্ধান্তটা কেন নিয়েছি — আর শেষে সবচেয়ে জরুরি অংশ: <em>কোথায় কোথায় আমি নিজেই ভুল করেছি</em> আর কী কী ঠিক করা দরকার। ওই শেষ দুইটা স্লাইড মিস করো না।",
+    "শুরুতে পুরো ম্যাপটা দেখে নাও। এক, <em>ক্যাশ</em> — অথ, পারমিশন, কোর্স ক্যাটালগ, নোটিফিকেশন ফিড, মোট তেইশটা জায়গায়। দুই, <em>লক</em> — যাতে একই কাজ দুইবার না হয়। তিন, <em>জব কিউ</em> — BullMQ। চার, <em>স্ট্রিম</em> — চ্যাট মেসেজ ডাটাবেজে নেওয়ার জন্য। পাঁচ, <em>Pub/Sub</em> — ছয়টা প্রসেস যেন একটাই রুম শেয়ার করতে পারে। ছয়, <em>রেট লিমিট</em>। সাত, <em>প্রেজেন্স</em> — কে অনলাইন আছে। আট, <em>অস্থায়ী স্টেট</em> — ডেস্কটপ লগইনের হ্যান্ডশেক। খেয়াল করো, এর মধ্যে <em>শুধু প্রথমটাই</em> আসলে ক্যাশ। বাকি সাতটা এমন কাজ যেগুলো Postgres দিয়ে করলে হয় ভয়ানক ধীর হতো, নয়তো একেবারেই সম্ভব হতো না।",
+    "প্রথম সিদ্ধান্ত — কানেকশন। আমি <em>চারটা আলাদা</em> ioredis ক্লায়েন্ট খুলি, একটা না। কেন? সাবস্ক্রাইব মোডে থাকা কানেকশনে Redis অন্য কোনো কমান্ডই নেয় না — তাই Socket.IO-র পাব আর সাব আলাদা লাগবেই। কিন্তু সবচেয়ে গুরুত্বপূর্ণ চতুর্থটা: <em>redisCacheConnection</em>। এটার <em>commandTimeout দেড় সেকেন্ড</em>, আর রিট্রাই মাত্র একবার। মানে Redis যদি ধীর হয়ে যায়, ক্যাশ রিড দেড় সেকেন্ডেই হাল ছেড়ে দেবে, আর রিকোয়েস্টটা সরাসরি ডাটাবেজ থেকে উত্তর নিয়ে চলে যাবে। ইউজার একটু দেরি টের পাবে, কিন্তু <em>পেজ ঝুলে থাকবে না</em>। এই এক লাইনের কনফিগটা প্রোডাকশনে অনেকবার বাঁচিয়েছে।",
+    "এবার ক্যাশ ইঞ্জিনের ভেতরে। আমি Redis-এ সরাসরি ভ্যালু রাখি না — একটা <em>খাম</em> রাখি। ভেতরে তিনটা জিনিস: ভার্সন, freshUntil, আর আসল ডেটা। <em>ভার্সন</em> কেন? ক্যাশের ফরম্যাট বদলালে পুরনো এন্ট্রিগুলো নিজে থেকেই বাতিল হয়ে যায়, ম্যানুয়ালি ফ্লাশ করতে হয় না। <em>freshUntil</em> কেন? কারণ Redis-এর TTL আর ডেটার ফ্রেশনেস — এই দুইটা আমি <em>আলাদা</em> রেখেছি। ডেটা বাসি হয়ে যেতে পারে অথচ key তখনও বেঁচে থাকতে পারে। কেন সেটা কাজে লাগে, পরের স্লাইডে। আর <em>jitter</em> — TTL-এর সাথে দশ পার্সেন্ট এলোমেলো যোগ-বিয়োগ, যাতে একসাথে লেখা হাজারটা key একই সেকেন্ডে এক্সপায়ার না করে। নাহলে প্রতি TTL-এ ডাটাবেজে একটা করে ঢেউ আসত।",
+    "তাই ক্যাশ পড়ার সময় তিনটা অবস্থা পাই। <em>FRESH</em> — সাথে সাথে ফেরত, ডাটাবেজে যাওয়ার প্রশ্নই নেই। <em>STALE</em> — পুরনো ডেটাটাই সাথে সাথে ফেরত দিই, আর পেছনে চুপচাপ রিফ্রেশ করি; ইউজার একটুও অপেক্ষা করে না। <em>MISS</em> — কেউ একজন লক নিয়ে ডাটাবেজে যায়, বাকিরা অপেক্ষা করে। এখন একটা <em>সৎ কথা</em> বলি, যেটা শেষে আবার বলব — আমার তেইশটা কল সাইটের মধ্যে বিশটাই strict মোড ব্যবহার করে, যেখানে staleTtl শূন্য। মানে এই মাঝের দরজাটা, STALE, <em>আমার কোডে আসলে কখনো খোলেই না</em>। কোডটা লেখা আছে, কাজে লাগছে না। এটা একটা মিস করা সুযোগ।",
+    "MISS-এর ক্ষেত্রে সবচেয়ে বিপজ্জনক জিনিসটা হলো <em>cache stampede</em>। ক্যাশ এইমাত্র এক্সপায়ার করলো, আর ঠিক তখন দশ হাজার রিকোয়েস্ট এলো — সবাই মিস পাবে, সবাই ডাটাবেজে যাবে। আমি চার স্তরে আটকেছি। এক, <em>singleFlight</em> — একই প্রসেসের ভেতর সবাই একটাই Promise শেয়ার করে। দুই, <em>Redis লক</em> — ছয়টা ইনস্ট্যান্সের মধ্যে একজনই ডাটাবেজে যায়। তিন, বাকিরা চল্লিশ থেকে একশো মিলিসেকেন্ড <em>এলোমেলো</em> গ্যাপে ক্যাশ চেক করে; এলোমেলো, যাতে সবাই আবার একসাথে গিয়ে না পড়ে। চার, <em>rescue lock</em> — অপেক্ষার সময় শেষেও ক্যাশ খালি থাকলে আরেকবার লক নেওয়ার চেষ্টা। আর <em>heartbeat</em>-টা খেয়াল করো: লক পাঁচ সেকেন্ডের, কিন্তু কোয়েরি সাত সেকেন্ড নিলে লক ছুটে যেত আর দুইজন একসাথে ঢুকে পড়ত। তাই প্রতি এক-তৃতীয়াংশ সময়ে লকের মেয়াদ বাড়ানো হয়।",
+    "লক নেওয়ার চেয়ে <em>লক ছাড়াটা</em> আসলে বেশি কঠিন, আর এখানেই বেশিরভাগ মানুষ ভুল করে। ভাবো: Worker A লক নিলো। কাজটা একটু বেশি সময় নিলো, লক এক্সপায়ার করে গেলো। এখন Worker B নতুন লক নিলো। তারপর A কাজ শেষ করে <em>DEL</em> করলো — কিন্তু সে তো নিজের লক মুছলো না, সে <em>B-র লক মুছে দিলো</em>। এখন দুইজন একসাথে চলছে। তাই আমি প্রতিটা লকের সাথে একটা <em>র‍্যান্ডম টোকেন</em> রাখি, আর ছাড়ার সময় Lua স্ক্রিপ্টে মিলিয়ে দেখি — টোকেন মিললে তবেই DEL। Lua কেন? কারণ GET আর DEL আলাদা করে পাঠালে মাঝখানে আবার সেই একই রেস। Lua-তে Redis পুরোটা <em>একটা অবিভাজ্য অপারেশন</em> হিসেবে চালায়।",
+    "এবার ইনভ্যালিডেশন — ক্যাশের সবচেয়ে কঠিন সমস্যা। আমি দুইটা কৌশল ব্যবহার করি। প্রথমটা সহজ: <em>key-টা জানা থাকলে সরাসরি DELETE</em>। স্টুডেন্ট প্রোফাইল আপডেট করলো? ওই একটা key মুছে দাও। এনরোলমেন্ট বাতিল হলো? ওই স্টুডেন্ট-কোর্স জোড়ার key মুছে দাও, পরের রিকোয়েস্টেই সে আর ঢুকতে পারবে না। অথ, পারমিশন, রেস্ট্রিকশন — এই সবগুলোতেই এটা কাজ করে, কারণ key-এর নামটা <em>ঠিক জানা আছে</em>। কিন্তু এখানেই এই কৌশলের সীমা: একটা কোর্সের নাম এডিট করলে ঠিক <em>কোন কোন লিস্ট</em> বদলাবে — সেটা তো জানা নেই।",
+    "তাই দ্বিতীয় কৌশল: <em>মুছি না, ভার্সন বাড়াই</em>। কোর্স ক্যাটালগের key-তে কোয়েরি প্যারামিটার আছে, হোস্ট আছে, পেজ নম্বর আছে — সব মিলিয়ে হাজার হাজার key। খুঁজে মুছতে <em>SCAN</em> চালালে Redis ব্যস্ত হয়ে যাবে। তাই আমি ভার্সন নম্বরটা <em>key-এর নামের ভেতরেই</em> বসিয়ে দিয়েছি। কোর্স এডিট হলে শুধু একটা <em>INCR</em>। ব্যস। পরের রিকোয়েস্ট আর পুরনো নামটা চাইবেই না, তাই সব পুরনো key এক মুহূর্তে <em>অনাথ</em> হয়ে যায়, আর TTL শেষ হলে Redis নিজেই মুছে ফেলে। আমাদের কিছু করতে হয় না। এটা চার জায়গায় ব্যবহার করেছি — কোর্স ক্যাটালগ, my-courses, লাইভ ক্লাস লিস্ট আর নোটিফিকেশন ফিড।",
+    "এখন যে জিনিসটা নিয়ে আমি নিজে সবচেয়ে খুশি — <em>দুইটা ভার্সন একসাথে</em>। সমস্যাটা বুঝো: \"আমার কোর্স\" লিস্টটা দুইভাবে বদলাতে পারে। এক, স্টুডেন্ট নিজে নতুন কোর্স কিনলো। দুই, অ্যাডমিন কোর্সের নাম বা ছবি বদলালো। এখন যদি শুধু একটা <em>গ্লোবাল</em> ভার্সন রাখতাম, তাহলে একটা কোর্স এডিট করলেই পাঁচ লাখ স্টুডেন্টের ক্যাশ একসাথে অচল — সবাই একসাথে ডাটাবেজে ঝাঁপিয়ে পড়ত। আর যদি শুধু <em>স্টুডেন্ট-ভিত্তিক</em> ভার্সন রাখতাম, তাহলে কোর্স এডিট কারো কাছেই পৌঁছাত না। তাই key-তে <em>দুইটাই</em> — sv মানে স্টুডেন্ট ভার্সন, cv মানে কোর্স ভার্সন। যেটা যতটুকু বদলেছে, ঠিক ততটুকুই অচল হয়। আর দুইটা ভার্সন একটাই <em>MGET</em>-এ আনি, দুই রাউন্ড-ট্রিপ নয়।",
+    "এবার বলি সবচেয়ে বড় লাভটা কোথায় হয়েছে। প্রতিটা প্রোটেক্টেড রিকোয়েস্টে অন্তত তিনটা প্রশ্নের উত্তর লাগে: ইউজারটা কে, এই আইডিটা কোন কোর্সের, আর তার কি এই কোর্সে অ্যাক্সেস আছে। আগে এই তিনটাই <em>আলাদা ডাটাবেজ কোয়েরি</em> ছিল — প্রতিটা রিকোয়েস্টে, প্রতিটা এন্ডপয়েন্টে। এখন তিনটাই Redis থেকে আসে। মানে <em>শূন্য</em> ডাটাবেজ কোয়েরিতে অথ চেক শেষ। এটা একটা এন্ডপয়েন্টের হিসাব না — এটা <em>সব</em> এন্ডপয়েন্টের হিসাব, তাই লাভটা গুণিতক। আর একটা সূক্ষ্ম ব্যাপার খেয়াল করো: ব্যান বা রেস্ট্রিকশনগুলো ক্যাশ থেকে পড়ার <em>পরে</em> ফিল্টার করা হয় — মেয়াদ শেষ হয়ে গেছে কিনা সেটা তখনকার সময় ধরে হিসাব হয়। তাই কারো ব্যান শেষ হলে TTL-এর অপেক্ষা করতে হয় না।",
+    "TTL কীভাবে ঠিক করি? নিয়মটা খুব সহজ — TTL ঠিক করে <em>ডেটার গুরুত্ব</em>, ডেটার আকার নয়। প্রশ্ন একটাই: ভুল বা বাসি ডেটা দেখালে কতটা ক্ষতি? নোটিফিকেশন ফিড কুড়ি সেকেন্ড, কারণ ইউজার বারবার রিফ্রেশ করে। অথ ইউজার ষাট সেকেন্ড — কারণ কাউকে ব্যান করার পর সে যদি পাঁচ মিনিট ঢুকতে পারে সেটা <em>নিরাপত্তার সমস্যা</em>। কিন্তু পারমিশন দুই মিনিট, যদিও সেটাও নিরাপত্তা — কারণ ওখানে <em>সরাসরি DELETE</em>-ও আছে, TTL শুধু শেষ ভরসা। আর পুশ টোকেন দশ মিনিট, কারণ ওগুলো প্রায় বদলায়ই না। মূল ট্রেড-অফটা এই: <em>যেখানে ইনভ্যালিডেশন নেই, সেখানে TTL ছোট রাখো</em>।",
+    "এবার রিয়েলটাইম অংশ। PM2-তে আমার ছয়টা ইনস্ট্যান্স চলে — মানে ছয়টা <em>আলাদা</em> Node প্রসেস, প্রত্যেকের নিজের মেমোরি। স্টুডেন্ট A হয়তো ইনস্ট্যান্স ১-এ কানেক্টেড, স্টুডেন্ট B ইনস্ট্যান্স ৪-এ। A চ্যাটে কিছু লিখলে B কিছুই পাবে না, কারণ ইনস্ট্যান্স ১ জানেই না যে B বলে কেউ আছে। সমাধান Redis-এর Pub/Sub adapter — যেকোনো ইনস্ট্যান্স emit করলে সেটা Redis-এ publish হয়, আর বাকি পাঁচটা subscribe করে নিজেদের ক্লায়েন্টদের পৌঁছে দেয়। আমি <em>sharded</em> adapter ব্যবহার করি — সাধারণটা একটাই চ্যানেলে সব পাঠায়, তাই প্রতিটা ইনস্ট্যান্স প্রয়োজন না থাকলেও সব মেসেজ পায়। sharded ভার্সনে অপ্রয়োজনীয় ট্রাফিক অনেক কমে যায়।",
+    "এবার আমার সবচেয়ে প্রিয় অংশ — <em>কতজন দেখছে</em> সেটা গোনা। সমস্যা: একটা লাইভ ক্লাসে পাঁচশো জনও থাকতে পারে, আবার এক লাখও। প্রত্যেককে আলাদা করে ZSET-এ রাখলে প্রতি ইউজারে প্রায় সত্তর বাইট — এক লাখে সেটা মেগাবাইটে চলে যায়, প্রতিটা ক্লাসের জন্য। তাই আমি <em>হাইব্রিড</em> করেছি। পাঁচশোর নিচে হলে ZSET — একদম নিখুঁত সংখ্যা, আর প্রত্যেকের অ্যাভাটারও দেখানো যায়, কারণ ছোট ক্লাসে টিচার সেটা চান। পাঁচশোর উপরে হলে <em>HyperLogLog</em> — এটা একটা প্রোবাবিলিস্টিক স্ট্রাকচার, প্রায় শূন্য দশমিক আট শতাংশ ভুল হতে পারে, কিন্তু পাঁচ হাজার হোক বা পাঁচ লাখ, মেমোরি <em>সবসময় বারো কিলোবাইট</em>। এক লাখ চব্বিশ হাজার লেখার জায়গায় দুইশো এদিক-ওদিক হলে কেউ টেরও পাবে না। আর তিনটা ত্রিশ-সেকেন্ডের bucket মার্জ করি, তাই এক ঝলক দেখে চলে যাওয়া লোক গোনা হয় না। আর নিরাপত্তা হিসেবে — approx যদি exact-এর চেয়ে কম আসে, তখন exact-টাই দেখাই, যাতে সংখ্যাটা কখনো পিছিয়ে না যায়।",
+    "এখন একটা জিনিস যেটা অনেকে খেয়াল করে না। Redis <em>একটাই থ্রেডে</em> চলে। প্রতিটা কমান্ড মাইক্রোসেকেন্ডে শেষ হয়, কিন্তু <em>নেটওয়ার্ক রাউন্ড-ট্রিপ</em> মাইক্রোসেকেন্ড না। তাই আসল খরচ কমান্ডে না, খরচ <em>যাওয়া-আসায়</em>। প্রেজেন্স আপডেট করতে আমার চারটা কমান্ড লাগে — PFADD, ZCARD, ZADD, EXPIRE। আলাদা পাঠালে চারবার যাওয়া-আসা। তাই আমি চারটাই একটা <em>Lua স্ক্রিপ্টে</em> রেখেছি — একবার যাওয়া, একবার আসা, আর পুরোটা atomic। আর লক্ষ্য করো, \"রুমটা কি পাঁচশোর কম?\" — এই <em>সিদ্ধান্তটাও</em> স্ক্রিপ্টের ভেতরেই নেওয়া হয়। Node-এ এনে চেক করলে ততক্ষণে সংখ্যাটা বদলে যেতে পারত।",
+    "কিন্তু রাউন্ড-ট্রিপ কমানোর সবচেয়ে বড় অস্ত্র হলো <em>বাফারিং</em>। ভাবো, পঞ্চাশ হাজার স্টুডেন্ট ভিডিও দেখছে, প্রত্যেকে সেকেন্ডে একটা করে প্রোগ্রেস ইভেন্ট পাঠাচ্ছে। প্রতিটা সরাসরি Redis-এ লিখলে <em>Redis-ই বটলনেক</em> হয়ে যাবে। তাই প্রেজেন্স আপডেট এক সেকেন্ড মেমোরিতে জমে, তারপর <em>একটা pipeline</em>-এ সব একসাথে যায় — তিনশো জন করে চাঙ্কে ভাগ করে, যাতে একটা কমান্ড অতিরিক্ত বড় না হয়। প্রোগ্রেস আরও চালাক: এটা একটা <em>Map</em>-এ জমে, তাই একই ইউজারের নতুন ইভেন্ট পুরনোটা ওভাররাইট করে দেয় — ত্রিশ সেকেন্ডে একজন ত্রিশটা ইভেন্ট পাঠালেও ডাটাবেজে যায় <em>একটা</em>। আর ফ্লাশ ফেল করলে requeue করে পরের বার আবার চেষ্টা করে, তাই ডেটা হারায় না।",
+    "চ্যাট মেসেজ সেভ করার জন্য আমি Pub/Sub ব্যবহার করি না, <em>Redis Streams</em> ব্যবহার করি। কেন? কারণ Pub/Sub-এ কেউ যদি ওই মুহূর্তে না শুনে থাকে, মেসেজটা <em>চিরতরে হারিয়ে যায়</em>। চ্যাট মেসেজ হারানো যাবে না। Stream মেসেজ ধরে রাখে যতক্ষণ না কেউ ACK করে। ফ্লো-টা দেখো: XADD দিয়ে স্ট্রিমে ঢোকে, ওয়ার্কার XREADGROUP দিয়ে দুইশোটা করে পড়ে — <em>BLOCK</em> মোডে, মানে স্ট্রিম খালি থাকলে অপেক্ষা করে, বারবার পোলিং করে Redis-কে জ্বালায় না। সেভ সফল হলে XACK। ব্যাচ ফেল করলে <em>একটা একটা করে</em> আবার চেষ্টা, যাতে একটা খারাপ মেসেজের জন্য দুইশোটা না হারায়। তাতেও ফেল করলে <em>dead-letter</em> স্ট্রিমে কারণসহ জমা। আর সবচেয়ে সুন্দর অংশ — <em>XAUTOCLAIM</em>। ওয়ার্কার যদি মেসেজ পড়ার পর ক্র্যাশ করে, ত্রিশ সেকেন্ড পর আরেকটা ওয়ার্কার সেই আটকে থাকা কাজগুলো <em>দখল করে নেয়</em>।",
+    "রেট লিমিটও Redis-এ, আর কারণটা গুরুত্বপূর্ণ। যদি কাউন্টারটা প্রসেসের মেমোরিতে রাখতাম, তাহলে ছয়টা ইনস্ট্যান্সে ছয়টা <em>আলাদা</em> কাউন্টার হতো। লিমিট পাঁচশো দিলে অ্যাটাকার আসলে <em>তিন হাজার</em> রিকোয়েস্ট পাঠাতে পারত — লোড ব্যালেন্সার তাকে ঘুরিয়ে ঘুরিয়ে পাঠাত। Redis-এ রাখায় কাউন্টার একটাই। আর আমি <em>দুই স্তরে</em> লিমিট দিই — IP ধরে, আবার ফোন বা ইমেইল ধরেও। শুধু IP দিলে একটা অফিস বা মোবাইল অপারেটরের পেছনের সবাই একসাথে ব্লক হয়ে যেত। আর OTP রিসেন্ডে একটা চালাকি আছে — কুকির রিফ্রেশ টোকেন ডিকোড করে <em>ইউজার আইডি</em> দিয়ে লিমিট করি, তাই কেউ ফোন নম্বর বদলে বদলে চেষ্টা করেও পার পাবে না।",
+    "এবার একটা জরুরি প্রশ্ন — Redis যদি মরে যায়? আমার নিয়ম হলো: <em>ক্যাশ একটা অপ্টিমাইজেশন, নির্ভরতা নয়</em>। তাই প্রতিটা getCached ফাংশনে try-catch আছে, আর catch-এ সরাসরি loader কল — মানে ডাটাবেজ থেকে পড়া। Redis ধীর হলে দেড় সেকেন্ডে টাইমআউট, সাইট একটু ধীর হয়। Redis একেবারে ডাউন হলেও সাইট <em>চলে</em>, শুধু ধীরে। কিন্তু এখানে আমাকে সৎ থাকতে হবে — এটা <em>শুধু ক্যাশের জন্য</em> সত্যি। কিউ, স্ট্রিম আর Socket.IO adapter — এগুলো Redis ছাড়া <em>একদমই চলবে না</em>। তাই Redis-এর আপটাইম আর মেমোরি মনিটর করাটা আমার জন্য ঐচ্ছিক কিছু না।",
+    "এবার সবচেয়ে দরকারি অংশ — <em>আমি কোথায় কোথায় আরও ভালো করতে পারতাম</em>। এই চারটা আমি এখনই ঠিক করব। এক, আর সবচেয়ে বড় ঝুঁকি: <em>ক্যাশ আর কিউ আমার একই Redis-এ</em>। ক্যাশ key মুছে গেলে কিছুই হয় না, কিন্তু BullMQ-র জব বা চ্যাট স্ট্রিম মুছে গেলে <em>ডেটা হারায়</em>। মেমোরি ভরে গেলে allkeys-lru পলিসি এই দুইটার পার্থক্য বোঝে না। সমাধান — দুইটা আলাদা Redis, ক্যাশেরটায় allkeys-lru, কিউ আর স্ট্রিমেরটায় noeviction আর AOF চালু। দুই, <em>maxmemory</em> সেট করা। লিমিট না দিলে Redis RAM ভরে যাওয়া পর্যন্ত বাড়তেই থাকে, তারপর একদিন OS প্রসেসটাকে মেরে ফেলে। তিন, <em>hit রেট মাপার কোনো ব্যবস্থাই নেই আমার</em> — কোন ক্যাশটা আসলে কাজ করছে সেটা এখন পুরোপুরি অনুমান। চল্লিশ পার্সেন্ট হিট রেটের ক্যাশ রাখার চেয়ে ফেলে দেওয়াই ভালো, কিন্তু সেটা জানব কীভাবে? চার, BullMQ-র জন্য <em>আলাদা কানেকশন</em> — ক্যাশের জন্য যেমন করেছি, তেমনই।",
+    "আর এই পাঁচটা পরে করলেও চলবে। পাঁচ — মনে আছে পাঁচ নম্বর স্লাইডে বলেছিলাম? <em>stale-while-revalidate আসলে ব্যবহারই হচ্ছে না</em>। সুন্দর ব্যাকগ্রাউন্ড-রিফ্রেশ কোড লেখা আছে, কিন্তু তেইশটার মধ্যে বিশটা কল সাইট strict মোডে, যেখানে staleTtl শূন্য। মানে key ফ্রেশনেস শেষ হওয়ার ঠিক সেই মুহূর্তেই মুছেও যায়। ফলে প্রতি TTL-এ একজনকে ডাটাবেজের জন্য অপেক্ষা করতেই হয়। কোর্স ক্যাটালগে staleTtl ষাট সেকেন্ড দিলে ওই অপেক্ষাটাও থাকত না — <em>কোডটা আমার আছে, আমি শুধু ব্যবহার করিনি</em>। ছয় — বড় রুমে HGETALL পাঁচশো ফিল্ড একবারে টানে, আর Redis একটাই থ্রেডে চলে বলে ততক্ষণ বাকি সব কমান্ড অপেক্ষা করে। সাত — key প্রিফিক্সগুলো একটা কনভেনশনে আনা। আট — অথ ইউজারের জন্য দুই-তিন সেকেন্ডের একটা ছোট ইন-মেমোরি LRU, তাহলে Redis রাউন্ড-ট্রিপটাও বাঁচে। আর নয় — এখন আমার <em>একটাই</em> Redis ইনস্ট্যান্স, মানে single point of failure. একটা রেপ্লিকা আর Sentinel দিলে ফেইলওভার হতো।",
+    "সব মিলিয়ে চারটা কথা মনে রাখলেই হবে। এক, <em>TTL ঠিক করে ডেটার গুরুত্ব</em> — প্রশ্ন একটাই, বাসি ডেটা দেখালে কতটা ক্ষতি। দুই, <em>key জানা থাকলে DELETE, না জানলে ভার্সন INCR</em> — SCAN কখনো নয়। তিন, <em>রাউন্ড-ট্রিপ কমাও</em> — pipeline, Lua, MGET, বাফার। আর চার, <em>ক্যাশ ফেল করলে ফিচার ফেল করা উচিত না</em> — যদিও কিউ আর স্ট্রিমের জন্য এটা খাটে না, ওখানে Redis আসল নির্ভরতা। আর শেষ কথাটা — আজকে আমি নিজের নয়টা দুর্বলতা দেখালাম। কোড লেখার চেয়ে <em>নিজের কোডের দুর্বলতা জানাটা</em> বেশি জরুরি, কারণ ওটা না জানলে একদিন রাত তিনটায় সেটা নিজে থেকে জানান দেয়। ভিডিওটা কাজে লাগলে লাইক দিও, আর তোমার সিস্টেমে Redis কোথায় ব্যবহার করছো কমেন্টে লিখো। ধন্যবাদ।"
+  ];
+
+  /* ---- fill generated dot fields ---- */
+  deck.querySelectorAll("[data-dots]").forEach((host) => {
+    const n = +host.dataset.dots;
+    let html = "";
+    for (let i = 0; i < n; i++) {
+      html += `<i style="animation-delay:${((i % 12) * 0.05 + Math.floor(i / 12) * 0.09).toFixed(2)}s"></i>`;
+    }
+    host.innerHTML = html;
+  });
+
+  /* ---- rail ---- */
+  slides.forEach(() => rail.insertAdjacentHTML("beforeend", '<span class="tick"></span>'));
+  const ticks = [...rail.children];
+
+  /* ---- navigation ---- */
+  let idx = 0;
+  let auto = false;
+  let timer = null;
+  const bn = (n) => String(n).replace(/\d/g, (d) => "০১২৩৪৫৬৭৮৯"[d]);
+
+  function show(next) {
+    idx = (next + slides.length) % slides.length;
+    slides.forEach((s, i) => s.classList.toggle("is-active", i === idx));
+    ticks.forEach((t, i) => {
+      t.classList.toggle("on", i === idx);
+      t.classList.toggle("done", i < idx);
+    });
+    bar.style.width = ((idx + 1) / slides.length) * 100 + "%";
+    slideNo.textContent = `${bn(String(idx + 1).padStart(2, "0"))} / ${bn(slides.length)}`;
+    pHead.textContent = `স্লাইড ${bn(String(idx + 1).padStart(2, "0"))} — যা বলবেন`;
+    pText.innerHTML = script[idx] || "";
+    if (auto) queue();
+  }
+
+  function queue() {
+    clearTimeout(timer);
+    const dur = (+slides[idx].dataset.dur || 30) * 1000;
+    timer = setTimeout(() => show(idx + 1), dur);
+  }
+
+  function toggleAuto() {
+    auto = !auto;
+    hint.classList.toggle("is-hidden", auto);
+    if (auto) queue(); else clearTimeout(timer);
+  }
+
+  document.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (k === "arrowright" || k === " " || k === "pagedown") { e.preventDefault(); clearTimeout(timer); show(idx + 1); }
+    else if (k === "arrowleft" || k === "pageup") { e.preventDefault(); clearTimeout(timer); show(idx - 1); }
+    else if (k === "a") toggleAuto();
+    else if (k === "n") prompt.classList.toggle("open");
+    else if (k === "f") { document.fullscreenElement ? document.exitFullscreen() : deck.requestFullscreen?.(); }
+    else if (k === "home") show(0);
+    else if (k === "end") show(slides.length - 1);
+    else if (k === "escape") prompt.classList.remove("open");
+  });
+
+  deck.addEventListener("click", (e) => {
+    if (e.target.closest(".prompt")) return;
+    clearTimeout(timer);
+    show(idx + (e.clientX < deck.getBoundingClientRect().left + deck.clientWidth * 0.24 ? -1 : 1));
+  });
+
+  show(0);
+})();
+</script>
