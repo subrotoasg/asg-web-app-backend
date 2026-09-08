@@ -602,9 +602,11 @@ model cycle {
 }
 
 model libApi {
-  id        String @id @unique @default(uuid()) @db.Uuid
-  libraryId String @unique
-  apiKey    String
+  id          String  @id @unique @default(uuid()) @db.Uuid
+  libraryId   String  @unique
+  apiKey      String
+  cdnHostname String?
+  tokenKey    String?
 }
 
 model cycleSubject {

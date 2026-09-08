@@ -14,6 +14,7 @@ import { helpers } from "../admin/admin.utils.js";
 import { buildQueryOptions } from "../../../../helper/buildQueryOptions.js";
 import { skip } from "@prisma/client/runtime/library";
 import config from "../../../config/index.js";
+import { ensureLibraryConfig } from "../../../lib/bunny-library-resolver.js";
 import { constants } from "../../../constant/index.js";
 import {
   filterableFieldsForUtilities,
@@ -1485,6 +1486,16 @@ const addStorageService = async (payload) => {
         apiKey: apiKey,
       },
     });
+
+    // Best effort: fills cdnHostname / tokenKey from Bunny so playback never
+    // has to resolve them at request time. Never fail the pull over it.
+    const libraryConfig = await ensureLibraryConfig(libraryId);
+
+    if (libraryConfig.status === "failed") {
+      console.error(
+        `[bunny-library] could not resolve ${libraryId}: ${libraryConfig.error}`,
+      );
+    }
 
     //update video library with options
     const updateData = {

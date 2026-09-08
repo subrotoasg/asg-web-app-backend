@@ -20,6 +20,7 @@
     "prisma:migrate": "npx prisma migrate deploy",
     "prisma:backup": "cp prisma/schema.prisma prisma/schema.prisma.backup",
     "export:practice-entitlement-catalog": "node scripts/export-practice-entitlement-catalog.js",
+    "backfill:bunny-libraries": "node scripts/backfill-bunny-library-config.js",
     "lint": "eslint src --ignore-path .eslintignore --ext .ts",
     "lint:fixed": "npx eslint src --fix",
     "prettier": "prettier --ignore-path .gitignore --write \"./src/**/*.+(js|ts|json)\"",

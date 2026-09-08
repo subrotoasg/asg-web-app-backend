@@ -14,6 +14,7 @@ import {
 } from "./courses.constants.js";
 import axios from "axios";
 import config from "../../../config/index.js";
+import { ensureLibraryConfig } from "../../../lib/bunny-library-resolver.js";
 import jwt from "jsonwebtoken";
 import { Enums } from "../../../constant/enums.js";
 import {
@@ -2063,6 +2064,16 @@ const updateCoursesIntoDb = async (courseId, courseImage, payload) => {
           apiKey: bunnyApiKey,
         },
       });
+
+      // Best effort: fills cdnHostname / tokenKey from Bunny so playback never
+      // has to resolve them at request time. Never fail the pull over it.
+      const libraryConfig = await ensureLibraryConfig(libraryId);
+
+      if (libraryConfig.status === "failed") {
+        console.error(
+          `[bunny-library] could not resolve ${libraryId}: ${libraryConfig.error}`,
+        );
+      }
     }
   }
 
@@ -2318,6 +2329,16 @@ const pullCourse = async (payload) => {
           apiKey: bunnyApiKey,
         },
       });
+
+      // Best effort: fills cdnHostname / tokenKey from Bunny so playback never
+      // has to resolve them at request time. Never fail the pull over it.
+      const libraryConfig = await ensureLibraryConfig(libraryId);
+
+      if (libraryConfig.status === "failed") {
+        console.error(
+          `[bunny-library] could not resolve ${libraryId}: ${libraryConfig.error}`,
+        );
+      }
     }
   }
 
