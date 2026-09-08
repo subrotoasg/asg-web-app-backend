@@ -43,6 +43,7 @@ import { issueRoute } from "../modules/superAdmin/issueTrack/issueTrack.route.js
 import { googleAnylitiesRoute } from "../modules/admin/googleAnaylities/googleAnaylaytic.js";
 import { grandCelebrationRoutes } from "../modules/grandCelebration/auth/auth.route.js";
 import { SocketMetricsRoute } from "../modules/socketMetrics/socketMetrics.route.js";
+import { bunnyRouter } from "../modules/video/video.route.js";
 
 //Decleration Path and route for any module
 const moduleRoutes = [
@@ -217,6 +218,10 @@ const moduleRoutes = [
   {
     path: "/socket-metrics",
     route: SocketMetricsRoute,
+  },
+  {
+    path: "/",
+    route: bunnyRouter,
   },
 ];
 

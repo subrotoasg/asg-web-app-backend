@@ -23,6 +23,7 @@ import {
 import { sendNotification } from "../../student/firebase/messaging/utils/notificationUtlis.js";
 import { Enums } from "../../../constant/enums.js";
 import { activity } from "../../../../helper/activityLog.js";
+import { invalidateVideoContent } from "../../../lib/bunny-content.cache.js";
 import config from "../../../config/index.js";
 import axios from "axios";
 import crypto from "crypto";
@@ -149,6 +150,8 @@ const getSingleCycleContentfromDb = async (CycleContentId) => {
           zoneSecurityKey: zoneSecurityKey,
         },
       });
+
+      await invalidateVideoContent(result?.videoUrl);
     } catch (error) {
       console.error(error?.message, "error on zone security key");
     }
@@ -750,6 +753,8 @@ const updateCycleContentIntoDb = async (
     data: updatedFields,
   });
 
+  await invalidateVideoContent(isExist?.videoUrl, result?.videoUrl);
+
   if (updatedFields?.cycleSubjectChapterId) {
     const getCycle = await findCycleByCycleSubjectChapter(
       updatedFields?.cycleSubjectChapterId,
@@ -819,6 +824,8 @@ const deleteCycleContentFromDb = async (CycleContentId, payload) => {
     },
     data,
   });
+
+  await invalidateVideoContent(isExist?.videoUrl);
 
   //log cycle content delete activity
   try {

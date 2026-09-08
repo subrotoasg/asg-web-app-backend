@@ -16,6 +16,8 @@ export const RedisNamespace = {
   RATE_LIMIT: "rate-limit",
 
   IDEMPOTENCY: "idempotency",
+
+  BUNNY: "bunny",
 };
 
 export function buildRedisKey(...parts) {

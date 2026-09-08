@@ -18,3 +18,5 @@ export { acquireLock, releaseLock, extendLock } from "./cache/cache.lock.js";
 export { singleFlight } from "./cache/cache.single-flight.js";
 
 export { getOrLoadStrictCache } from "./cache/cache.strict.js";
+
+export { getOrLoadCacheWithMissTtl } from "./cache/cache.negative.js";

@@ -22,6 +22,7 @@ import {
 } from "../../../middleware/handleCourseAuth.js";
 import config from "../../../config/index.js";
 import { signBunnyUrl } from "../../../lib/bunnySign.js";
+import { invalidateVideoContent } from "../../../lib/bunny-content.cache.js";
 import { sendNotification } from "../../student/firebase/messaging/utils/notificationUtlis.js";
 import { Enums } from "../../../constant/enums.js";
 import { activity } from "../../../../helper/activityLog.js";
@@ -154,6 +155,8 @@ const getSingleClassfromDb = async (ClassId, userData) => {
           zoneSecurityKey: zoneSecurityKey,
         },
       });
+
+      await invalidateVideoContent(result?.videoUrl);
     } catch (error) {
       console.error(error, "error on zone security key");
     }
@@ -736,6 +739,8 @@ const updateClassIntoDb = async (ClassId, uploadedFiles, payload) => {
     data: updatedFields,
   });
 
+  await invalidateVideoContent(isExist?.videoUrl, result?.videoUrl);
+
   if (updatedFields?.courseSubjectChapterId) {
     const getCourse = await findCourseByCourseSubjectChapter(
       updatedFields?.courseSubjectChapterId,
@@ -800,6 +805,8 @@ const deleteClassFromDb = async (ClassId, payload = {}) => {
     },
     data,
   });
+
+  await invalidateVideoContent(isExist?.videoUrl);
 
   try {
     let creatorName = "";
