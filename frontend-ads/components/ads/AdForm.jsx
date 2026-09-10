@@ -135,9 +135,35 @@ const toFormValues = (ad) => {
   };
 };
 
+/**
+ * targets থেকে খালি মান ছেঁটে ফেলা।
+ * MultiSelect গুলো RHF-এ name দিয়ে রেজিস্টার হয়, তাই কিছু না বাছলে ওখানে ""
+ * বসে যায় — zod তখন "Expected array, received string" দেয়। এখানেই সেটা ধরা।
+ */
+const cleanTargets = (t = {}) => {
+  const clean = (obj = {}) => {
+    const o = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (key === "global") {
+        if (val === true) o.global = true;
+        continue;
+      }
+      if (key === "exclude") continue;
+      const arr = Array.isArray(val) ? val.filter(Boolean) : [];
+      if (arr.length) o[key] = arr;
+    }
+    return o;
+  };
+
+  const out = clean(t);
+  const exclude = clean(t.exclude);
+  if (Object.keys(exclude).length) out.exclude = exclude;
+  return out;
+};
+
 /** ফর্ম → API পেলোড। খালি স্ট্রিং পাঠালে zod ফেল করত, তাই বাদ দেওয়া হয়। */
 const toPayload = (values) => {
-  const out = { targets: values.targets || {} };
+  const out = { targets: cleanTargets(values.targets) };
 
   const copyIfSet = (key, transform = (v) => v) => {
     const v = values[key];
