@@ -105,7 +105,7 @@ const CustomVideoPlayer = ({
           <BunnyPlayer
             key={key}
             videoId={classContent?.videoUrl}
-            poster={classContent?.thumbneil}
+            poster={classContent?.thumbneil || classContent?.thumbnail}
             ads={adsProp}
           />
         ) : (
@@ -113,7 +113,7 @@ const CustomVideoPlayer = ({
             key={key}
             hostingType="youtube"
             videoUrl={classContent?.videoUrl}
-            poster={classContent?.thumbneil}
+            poster={classContent?.thumbneil || classContent?.thumbnail}
             ads={adsProp}
           />
         )}
