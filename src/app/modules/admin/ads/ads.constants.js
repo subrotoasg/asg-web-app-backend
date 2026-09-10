@@ -10,6 +10,30 @@ export const pickQueryFields = [
   Enums.queryFields.SORT_ORDER,
 ];
 
+/* ad টেবিলে ঠিক যেই ফিল্ডগুলো লেখা যাবে।
+   authorizationMiddleware req.body-তে superAdminId / superAdminPhone /
+   superAdminEmail / userRole / userIdForLimit বসিয়ে দেয় — সেগুলো prisma-তে
+   গেলে "Unknown argument" ইরর হয়, তাই payload সবসময় এই লিস্ট দিয়ে ছেঁকে নিতে হবে */
+export const creativeFields = [
+  "title",
+  "description",
+  "creativeType",
+  "src",
+  "thumbnail",
+  "durationSec",
+  "skipAfterSec",
+  "clickUrl",
+  "cta",
+  "placement",
+  "atSec",
+  "status",
+  "startAt",
+  "endAt",
+  "priority",
+  "maxImpressionsPerUser",
+  "minGapSeconds",
+];
+
 export const searchableFields = ["title", "description", "cta"];
 export const filterableFields = ["status", "placement", "creativeType"];
 export const sortableFields = [

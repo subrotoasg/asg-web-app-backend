@@ -3,11 +3,13 @@ import { prisma } from "../../../../../constants/index.js";
 import AppErrors from "../../../../errors/AppErrors.js";
 import { buildQueryOptions } from "../../../../helper/buildQueryOptions.js";
 import { pickCreateAndUpdateResponse } from "../../../../helper/CreateAndUpdateResponseModify.js";
+import { pick } from "../../../../helper/pick.js";
 import { transformUpdatedFields } from "../../../../helper/updatedFieldsTransform.js";
 import { Enums } from "../../../constant/enums.js";
 import {
   AD_STATUS,
   AdScopes,
+  creativeFields,
   MAX_ADS_PER_BREAK,
   MAX_ADS_PER_RESPONSE,
   filterableFields,
@@ -49,7 +51,8 @@ const editorFields = (auth = {}) =>
  * CREATE
  * ================================================================ */
 const createAdIntoDb = async (payload = {}, auth = {}, imageURL = "") => {
-  const { targets, ...creative } = payload;
+  const { targets } = payload;
+  const creative = pick(payload, creativeFields);
 
   const rows = adsHelpers.buildTargetRows(targets);
 
@@ -281,7 +284,8 @@ const getAdByIdFromDb = async (adId, auth = {}) => {
 const updateAdIntoDb = async (adId, payload = {}, auth = {}, imageURL = "") => {
   await adsHelpers.assertCanMutateAd(adId, auth);
 
-  const { targets, ...creative } = payload;
+  const { targets } = payload;
+  const creative = pick(payload, creativeFields);
 
   /* transformUpdatedFields null বাদ দিয়ে দেয়, তাই editor ফিল্ডগুলো
      তার পরে বসানো হয় — নাহলে "আগের এডিটরকে মুছে দাও" (null) কাজ করত না,
