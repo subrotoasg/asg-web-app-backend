@@ -86,10 +86,14 @@ const adsApiServices = baseApi.injectEndpoints({
       ],
     }),
 
-    // প্লেয়ার — কোন কনটেন্টে কোন ad চলবে
+    /* প্লেয়ার — কোন কনটেন্টে কোন ad চলবে।
+       এখানে quearyUrlGenerator লাগে না — searchTerm/page/limit নেই,
+       শুধু দুইটা নির্দিষ্ট প্যারাম যায় */
     serveAds: builder.query({
       query: ({ contextScope, contextId }) => ({
-        url: `/ads/serve?contextScope=${contextScope}&contextId=${contextId}`,
+        url: `/ads/serve?contextScope=${encodeURIComponent(
+          contextScope,
+        )}&contextId=${encodeURIComponent(contextId)}`,
         method: "GET",
       }),
       // ad ইনভ্যালিডেশনে ভিডিও প্লেব্যাক বিঘ্নিত হওয়া উচিত না,
