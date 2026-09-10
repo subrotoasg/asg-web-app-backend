@@ -52,6 +52,9 @@ model superAdmin {
   downloadStudentInfo DateTime?
   activeChats         activeChat[]
 
+  adsCreated ad[] @relation("adCreatedBySuperAdmin")
+  adsUpdated ad[] @relation("adUpdatedBySuperAdmin")
+
   @@index([email, phone])
   @@index([email])
   @@index([phone])
@@ -135,6 +138,9 @@ model admin {
   adminMonthlyBills           adminMonthlyBill[]
   IssueTrack                  IssueTrack[]
   activeChats                 activeChat[]
+
+  adsCreated ad[] @relation("adCreatedByAdmin")
+  adsUpdated ad[] @relation("adUpdatedByAdmin")
 
   @@index([id, isDeleted, email, phone])
   @@index([email, phone])
@@ -282,6 +288,9 @@ model student {
   studentOAuthProvider     studentOAuthProvider[]
   studentRestrictions      studentRestriction[]
   activeChats              activeChat[]
+
+  adTargets adTarget[]
+  adEvents  adEvent[]
 
   @@index([id, email, phone])
   @@index([email, phone])
@@ -443,6 +452,8 @@ model course {
   serviceUsageLogs            serviceUsageLog[]
   courseServiceUsageSummaries courseServiceUsageSummary[]
 
+  adTargets adTarget[]
+
   @@index([productName, productFullName])
   @@map("courses")
 }
@@ -510,6 +521,8 @@ model courseSubject {
   course               course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
   subject              subject                @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
+  adTargets adTarget[]
+
   @@map("subjects")
 }
 
@@ -528,6 +541,8 @@ model courseSubjectChapter {
   courseSubject             courseSubject  @relation(fields: [courseSubjectId], references: [id], onDelete: Cascade)
   classContent              classContent[]
   liveClass                 liveClass[]
+
+  adTargets adTarget[]
 
   @@map("chapters")
 }
@@ -567,6 +582,8 @@ model classContent {
   serial      Int?         @default(1)
   activeChats activeChat[]
 
+  adTargets adTarget[]
+
   @@map("classContents")
 }
 
@@ -598,6 +615,8 @@ model cycle {
   noticeORroutine     noticeORroutine[]
   notificationLogs    notificationLog[]
 
+  adTargets adTarget[]
+
   @@map("cycles")
 }
 
@@ -624,6 +643,8 @@ model cycleSubject {
   cycle               cycle                 @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   subject             subject               @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
+  adTargets adTarget[]
+
   @@map("cycleSubjects")
 }
 
@@ -644,6 +665,8 @@ model cycleSubjectChapter {
   chapter                  chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
   cycleSubject             cycleSubject   @relation(fields: [cycleSubjectId], references: [id], onDelete: Cascade)
   liveClass                liveClass[]
+
+  adTargets adTarget[]
 
   @@map("cycleSubjectChapters")
 }
@@ -680,6 +703,8 @@ model cycleContent {
   //serial
   serial                Int?                @default(1)
   activeChats           activeChat[]
+
+  adTargets adTarget[]
 
   @@map("cycleContents")
 }
@@ -864,6 +889,8 @@ model liveClass {
   admin                 admin                 @relation(fields: [adminId], references: [id], onDelete: Cascade)
   courseSubjectChapter  courseSubjectChapter? @relation(fields: [courseSubjectChapterId], references: [id], onDelete: Cascade)
   cycleSubjectChapter   cycleSubjectChapter?  @relation(fields: [cycleSubjectChapterId], references: [id], onDelete: Cascade)
+
+  adTargets adTarget[]
 
   @@map("liveClasses")
 }
@@ -1759,4 +1786,192 @@ model grandCelebrationAuth {
   updatedAt DateTime @updatedAt
 
   @@map("grandCelebrationAuths")
+}
+
+// ============================================================
+// ADS — বিজ্ঞাপন
+// একটা ad যেকোনো স্কোপে টার্গেট করা যায়: গ্লোবাল, কোর্স, কোর্স-সাবজেক্ট,
+// চ্যাপ্টার, ক্লাস কন্টেন্ট, সাইকেল ও তার হায়ারার্কি, লাইভ ক্লাস,
+// নির্দিষ্ট স্টুডেন্ট, বা স্টুডেন্ট+কোর্স জোড়া।
+// টার্গেট আলাদা টেবিলে, তাই এক ad-এ একসাথে অনেকগুলো ক্লাস/সাবজেক্ট দেওয়া যায়।
+// ============================================================
+
+enum AdCreativeType {
+  VIDEO
+  IMAGE
+}
+
+enum AdPlacement {
+  PRE_ROLL
+  MID_ROLL
+  POST_ROLL
+  OVERLAY
+}
+
+enum AdStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum AdTargetScope {
+  GLOBAL
+  COURSE
+  COURSE_SUBJECT
+  COURSE_SUBJECT_CHAPTER
+  CLASS_CONTENT
+  CYCLE
+  CYCLE_SUBJECT
+  CYCLE_SUBJECT_CHAPTER
+  CYCLE_CONTENT
+  LIVE_CLASS
+  STUDENT
+  STUDENT_COURSE
+}
+
+enum AdTargetMode {
+  INCLUDE
+  EXCLUDE
+}
+
+enum AdEventType {
+  IMPRESSION
+  COMPLETE
+  SKIP
+  CLICK
+}
+
+model ad {
+  id          String  @id @default(uuid()) @db.Uuid
+  title       String
+  description String?
+
+  // creative
+  creativeType AdCreativeType @default(VIDEO)
+  src          String
+  thumbnail    String?
+  durationSec  Int            @default(15)
+  skipAfterSec Int? // null = skip করা যাবে না
+  clickUrl     String?
+  cta          String?
+
+  // placement — MID_ROLL হলে atSec কত সেকেন্ডে ঢুকবে
+  placement AdPlacement @default(PRE_ROLL)
+  atSec     Int         @default(0)
+
+  // scheduling
+  status    AdStatus  @default(DRAFT)
+  startAt   DateTime?
+  endAt     DateTime?
+  priority  Int       @default(0) // বেশি হলে আগে দেখাবে
+  isDeleted Boolean   @default(false)
+
+  // frequency capping (per user)
+  maxImpressionsPerUser Int?
+  minGapSeconds         Int? // একই ইউজারকে দুইবার দেখানোর মাঝে ন্যূনতম বিরতি
+
+  // counters (Redis থেকে flush হয়ে আসে)
+  impressionCount Int @default(0)
+  completeCount   Int @default(0)
+  skipCount       Int @default(0)
+  clickCount      Int @default(0)
+
+  // audit — কে বানালো
+  createdBySuperAdminId String?     @db.Uuid
+  createdBySuperAdmin   superAdmin? @relation("adCreatedBySuperAdmin", fields: [createdBySuperAdminId], references: [id], onDelete: SetNull)
+  createdByAdminId      String?     @db.Uuid
+  createdByAdmin        admin?      @relation("adCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+
+  updatedBySuperAdminId String?     @db.Uuid
+  updatedBySuperAdmin   superAdmin? @relation("adUpdatedBySuperAdmin", fields: [updatedBySuperAdminId], references: [id], onDelete: SetNull)
+  updatedByAdminId      String?     @db.Uuid
+  updatedByAdmin        admin?      @relation("adUpdatedByAdmin", fields: [updatedByAdminId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  targets adTarget[]
+  events  adEvent[]
+
+  @@index([status, isDeleted])
+  @@index([status, startAt, endAt])
+  @@index([createdByAdminId])
+  @@index([createdBySuperAdminId])
+  @@index([placement, status])
+  @@map("ads")
+}
+
+model adTarget {
+  id   String @id @default(uuid()) @db.Uuid
+  adId String @db.Uuid
+  ad   ad     @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  scope AdTargetScope
+  mode  AdTargetMode  @default(INCLUDE)
+
+  // প্রতিটা স্কোপের জন্য আলাদা FK কলাম — তাই entity ডিলিট হলে target-ও
+  // cascade-এ মুছে যায়, orphan থাকে না
+  courseId               String? @db.Uuid
+  courseSubjectId        String? @db.Uuid
+  courseSubjectChapterId String? @db.Uuid
+  classContentId         String? @db.Uuid
+  cycleId                String? @db.Uuid
+  cycleSubjectId         String? @db.Uuid
+  cycleSubjectChapterId  String? @db.Uuid
+  cycleContentId         String? @db.Uuid
+  liveClassId            String? @db.Uuid
+  studentId              String? @db.Uuid
+
+  course               course?               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseSubject        courseSubject?        @relation(fields: [courseSubjectId], references: [id], onDelete: Cascade)
+  courseSubjectChapter courseSubjectChapter? @relation(fields: [courseSubjectChapterId], references: [id], onDelete: Cascade)
+  classContent         classContent?         @relation(fields: [classContentId], references: [id], onDelete: Cascade)
+  cycle                cycle?                @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  cycleSubject         cycleSubject?         @relation(fields: [cycleSubjectId], references: [id], onDelete: Cascade)
+  cycleSubjectChapter  cycleSubjectChapter?  @relation(fields: [cycleSubjectChapterId], references: [id], onDelete: Cascade)
+  cycleContent         cycleContent?         @relation(fields: [cycleContentId], references: [id], onDelete: Cascade)
+  liveClass            liveClass?            @relation(fields: [liveClassId], references: [id], onDelete: Cascade)
+  student              student?              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  // একই ad-এ একই এন্টিটি দুইবার যোগ হবে না
+  @@unique([adId, scope, courseId, courseSubjectId, courseSubjectChapterId, classContentId, cycleId, cycleSubjectId, cycleSubjectChapterId, cycleContentId, liveClassId, studentId], map: "ad_targets_unique_entity")
+  @@index([adId])
+  @@index([scope, mode])
+  @@index([courseId])
+  @@index([courseSubjectId])
+  @@index([courseSubjectChapterId])
+  @@index([classContentId])
+  @@index([cycleId])
+  @@index([cycleSubjectId])
+  @@index([cycleSubjectChapterId])
+  @@index([cycleContentId])
+  @@index([liveClassId])
+  @@index([studentId])
+  @@map("ad_targets")
+}
+
+model adEvent {
+  id   String      @id @default(uuid()) @db.Uuid
+  adId String      @db.Uuid
+  ad   ad          @relation(fields: [adId], references: [id], onDelete: Cascade)
+  type AdEventType
+
+  studentId String?  @db.Uuid
+  student   student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  // কোন কনটেক্সটে দেখানো হয়েছিল
+  contextScope AdTargetScope?
+  contextId    String?        @db.Uuid
+
+  positionSec Int? // ভিডিওর কত সেকেন্ডে
+  createdAt   DateTime @default(now())
+
+  @@index([adId, type, createdAt])
+  @@index([studentId, adId])
+  @@index([createdAt])
+  @@map("ad_events")
 }
